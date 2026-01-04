@@ -682,14 +682,20 @@ if (await thingCacheFile.exists()) {
   console.log("Loading thing index from cache...");
   try {
     const cached = await thingCacheFile.json();
-    if (Array.isArray(cached)) {
-      thingIndex.push(...cached);
-      console.log(`✓ Loaded ${thingIndex.length} things from cache`);
+    if (Array.isArray(cached) && cached.length > 0) {
+      // Validate that cached data has the expected structure
+      const sampleEntry = cached[0];
+      if (sampleEntry && typeof sampleEntry.id === 'string' && typeof sampleEntry.name === 'string') {
+        thingIndex.push(...cached);
+        console.log(`✓ Loaded ${thingIndex.length} things from cache`);
+      } else {
+        throw new Error("Invalid cache entry structure");
+      }
     } else {
-      throw new Error("Invalid cache format");
+      throw new Error("Invalid cache format or empty array");
     }
   } catch (error) {
-    console.log("Thing cache invalid, rebuilding...");
+    console.log(`Thing cache invalid (${error.message}), rebuilding...`);
   }
 }
 
@@ -705,14 +711,21 @@ if (thingIndex.length === 0) {
     
     console.log(`Found ${totalFiles} thing files to process...`);
     
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      
-      // Progress logging every 5000 files (like area index)
-      if (i % 5000 === 0) {
-        const percent = ((i / totalFiles) * 100).toFixed(1);
-        console.log(`Indexed ${i}/${totalFiles} things (${percent}%)...`);
-      }
+    // Process files in batches to manage memory usage
+    const batchSize = 1000;
+    for (let batchStart = 0; batchStart < files.length; batchStart += batchSize) {
+      const batchEnd = Math.min(batchStart + batchSize, files.length);
+      const batch = files.slice(batchStart, batchEnd);
+
+      for (let i = 0; i < batch.length; i++) {
+        const file = batch[i];
+        const globalIndex = batchStart + i;
+
+        // Progress logging every 5000 files (like area index)
+        if (globalIndex % 5000 === 0) {
+          const percent = ((globalIndex / totalFiles) * 100).toFixed(1);
+          console.log(`Indexed ${globalIndex}/${totalFiles} things (${percent}%)...`);
+        }
       
       if (!file.endsWith(".json")) continue;
       
@@ -721,14 +734,14 @@ if (thingIndex.length === 0) {
       try {
         const raw = await fs.readFile(path.join(infoDir, file), "utf-8");
         const info = JSON.parse(raw);
-        
+
         // Only index things that are not unlisted (include all, even with placedCount=0)
         if (!info || typeof info !== "object") continue;
         if (info.isUnlisted === true) continue;
-        
+
         // Use "thing" as default name if none provided
         const name = typeof info.name === "string" && info.name.trim() ? info.name.trim().toLowerCase() : "thing";
-        
+
         // Try to get tags
         let tags: string[] = [];
         try {
@@ -738,22 +751,62 @@ if (thingIndex.length === 0) {
             tags = tagData.tags.map((t: string) => t.toLowerCase());
           }
         } catch {
-          // No tags file
+          // No tags file - this is normal
         }
-        
-        thingIndex.push({ id: thingId, name, tags });
+
+        // Validate the entry before adding
+        if (!thingId || typeof thingId !== 'string') {
+          console.warn(`Skipping invalid thingId: ${thingId}`);
+          continue;
+        }
+
+        const entry = { id: thingId, name, tags };
+        thingIndex.push(entry);
         indexed++;
-      } catch {
-        // Skip invalid files
+
+        // Periodic memory check (every 10000 entries)
+        if (indexed % 10000 === 0) {
+          console.log(`Memory check: ${indexed} entries indexed, ${(process.memoryUsage().heapUsed / 1024 / 1024).toFixed(1)}MB heap used`);
+        }
+
+      } catch (fileError) {
+        // Log file processing errors but continue
+        if (indexed % 1000 === 0) { // Only log every 1000 errors to avoid spam
+          console.warn(`Error processing thing file ${file}:`, fileError.message);
+        }
+      }
+      }
+
+      // Force garbage collection between batches (if available)
+      if (global.gc) {
+        global.gc();
       }
     }
     
     console.log(`✓ Indexed ${indexed} searchable things out of ${totalFiles} total (100%)`);
-    
+
+    // Validate the index before saving
+    if (thingIndex.length === 0) {
+      throw new Error("No things were indexed");
+    }
+
     // Save to cache
-    await fs.mkdir("./cache", { recursive: true });
-    await fs.writeFile(THING_INDEX_CACHE, JSON.stringify(thingIndex));
-    console.log("✓ Thing index saved to cache");
+    try {
+      await fs.mkdir("./cache", { recursive: true });
+      const jsonData = JSON.stringify(thingIndex, null, 2); // Pretty print for debugging
+      await fs.writeFile(THING_INDEX_CACHE, jsonData);
+      console.log("✓ Thing index saved to cache");
+
+      // Verify the save worked
+      const verifyFile = createFileHandle(THING_INDEX_CACHE);
+      const verifyData = await verifyFile.json();
+      if (!Array.isArray(verifyData) || verifyData.length !== thingIndex.length) {
+        throw new Error("Cache verification failed");
+      }
+    } catch (saveError) {
+      console.error("Failed to save thing index cache:", saveError);
+      throw saveError;
+    }
   } catch (err) {
     console.error("Failed to build thing index:", err);
   }
