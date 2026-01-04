@@ -30,17 +30,6 @@ function createFileHandle(filePath: string) {
   };
 }
 
-// Helper function for cross-platform header access (Bun vs Node.js)
-function getHeader(request: any, headerName: string): string | undefined {
-  if (request.headers?.get) {
-    // Bun/Web API style
-    return request.headers.get(headerName);
-  } else if (request.headers && typeof request.headers === 'object') {
-    // Node.js style - headers is a plain object
-    return request.headers[headerName.toLowerCase()];
-  }
-  return undefined;
-}
 
 // Simple mutex for preventing concurrent account.json modifications
 class AsyncMutex {
@@ -869,14 +858,19 @@ const app = new Elysia()
   .onRequest(async ({ request }) => {
     console.info(JSON.stringify({
       ts: new Date().toISOString(),
-      ip: getHeader(request, 'X-Real-Ip'),
-      ua: getHeader(request, "User-Agent"),
+      ip: request.headers.get('X-Real-Ip'),
+      ua: request.headers.get("User-Agent"),
       method: request.method,
       url: request.url,
     }));
   })
-  .onError(({ code, error }) => {
-    console.info("error in middleware!", code, error.message);
+  .onError(async ({ code, error, request }) => {
+    console.info("error in middleware!", request.url, code);
+    console.log(error);
+  })
+  .onTransform(({ request, path, body, params }) => {
+    // Match Redux server's simple logging
+    console.log(request.method, path, { body, params })
   })
 
   .get("/admin", async () => {
@@ -1132,7 +1126,7 @@ const app = new Elysia()
 
       // Get profile from header, query param, or body
       let profileName =
-        getHeader(request, "X-Profile") ||
+        request.headers.get("X-Profile") ||
         (request.url ? new URL(request.url).searchParams.get("profile") : null) ||
         (body && typeof body === "object" && "profile" in body ? (body as any).profile : null) ||
         null;
@@ -3529,7 +3523,44 @@ const app = new Elysia()
     console.info("error in middleware!", code, error.message);
   });
 
-const server = createServer(app.fetch);
+// Use Node.js HTTP server with Web API Request conversion
+const server = createServer(async (req, res) => {
+  try {
+    // Handle CORS preflight requests
+    if (req.method === 'OPTIONS') {
+      res.writeHead(200, {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Profile',
+        'Access-Control-Max-Age': '86400'
+      });
+      res.end();
+      return;
+    }
+
+    const response = await app.fetch(req);
+    res.writeHead(response.status, Object.fromEntries(response.headers));
+    if (response.body) {
+      const reader = response.body.getReader();
+      const pump = async () => {
+        const { done, value } = await reader.read();
+        if (done) {
+          res.end();
+          return;
+        }
+        res.write(value);
+        pump();
+      };
+      pump();
+    } else {
+      res.end();
+    }
+  } catch (error) {
+    console.error('Server error:', error);
+    res.writeHead(500, { 'Content-Type': 'text/plain' });
+    res.end('Internal Server Error');
+  }
+});
 
 server.listen(PORT_API, HOST, () => {
   console.log(`🚀 API server is running on port ${PORT_API}...`);
@@ -3604,8 +3635,8 @@ const app_areaBundles = new Elysia()
     console.info(JSON.stringify({
       server: "AREABUNDLES",
       ts: new Date().toISOString(),
-      ip: getHeader(request, 'X-Real-Ip'),
-      ua: getHeader(request, "User-Agent"),
+      ip: request.headers.get('X-Real-Ip'),
+      ua: request.headers.get("User-Agent"),
       method: request.method,
       url: request.url,
     }));
@@ -3630,7 +3661,26 @@ const app_areaBundles = new Elysia()
     console.info("error in middleware!", code, error.message);
   });
 
-const server_areaBundles = createServer(app_areaBundles.fetch);
+// Start AreaBundles server with Node.js HTTP server
+const server_areaBundles = createServer(async (req, res) => {
+  try {
+    const response = await app_areaBundles.fetch(req);
+    res.writeHead(response.status, Object.fromEntries(response.headers));
+    if (response.body) {
+      const reader = response.body.getReader();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        res.write(value);
+      }
+    }
+    res.end();
+  } catch (error) {
+    console.error('AreaBundles server error:', error);
+    res.writeHead(500, { 'Content-Type': 'text/plain' });
+    res.end('Internal Server Error');
+  }
+});
 
 server_areaBundles.listen(PORT_CDN_AREABUNDLES, HOST, () => {
   console.log(`🦊 AreaBundles server is running at on port ${PORT_CDN_AREABUNDLES}...`);
@@ -3644,8 +3694,8 @@ const app_thingDefs = new Elysia()
     console.info(JSON.stringify({
       server: "THINGDEFS",
       ts: new Date().toISOString(),
-      ip: getHeader(request, 'X-Real-Ip'),
-      ua: getHeader(request, "User-Agent"),
+      ip: request.headers.get('X-Real-Ip'),
+      ua: request.headers.get("User-Agent"),
       method: request.method,
       url: request.url,
     }));
@@ -3681,7 +3731,26 @@ const app_thingDefs = new Elysia()
     console.info("error in middleware!", code, error.message);
   });
 
-const server_thingDefs = createServer(app_thingDefs.fetch);
+// Start ThingDefs server with Node.js HTTP server
+const server_thingDefs = createServer(async (req, res) => {
+  try {
+    const response = await app_thingDefs.fetch(req);
+    res.writeHead(response.status, Object.fromEntries(response.headers));
+    if (response.body) {
+      const reader = response.body.getReader();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        res.write(value);
+      }
+    }
+    res.end();
+  } catch (error) {
+    console.error('ThingDefs server error:', error);
+    res.writeHead(500, { 'Content-Type': 'text/plain' });
+    res.end('Internal Server Error');
+  }
+});
 
 server_thingDefs.listen(PORT_CDN_THINGDEFS, HOST, () => {
   console.log(`🦊 ThingDefs server is running at on port ${PORT_CDN_THINGDEFS}...`);
@@ -3694,8 +3763,8 @@ const app_ugcImages = new Elysia()
     console.info(JSON.stringify({
       server: "UGCIMAGES",
       ts: new Date().toISOString(),
-      ip: getHeader(request, 'X-Real-Ip'),
-      ua: getHeader(request, "User-Agent"),
+      ip: request.headers.get('X-Real-Ip'),
+      ua: request.headers.get("User-Agent"),
       method: request.method,
       url: request.url,
     }));
@@ -3727,7 +3796,26 @@ const app_ugcImages = new Elysia()
     console.info("error in middleware!", code, error.message);
   });
 
-const server_ugcImages = createServer(app_ugcImages.fetch);
+// Start UGC Images server with Node.js HTTP server
+const server_ugcImages = createServer(async (req, res) => {
+  try {
+    const response = await app_ugcImages.fetch(req);
+    res.writeHead(response.status, Object.fromEntries(response.headers));
+    if (response.body) {
+      const reader = response.body.getReader();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        res.write(value);
+      }
+    }
+    res.end();
+  } catch (error) {
+    console.error('UGC Images server error:', error);
+    res.writeHead(500, { 'Content-Type': 'text/plain' });
+    res.end('Internal Server Error');
+  }
+});
 
 server_ugcImages.listen(PORT_CDN_UGCIMAGES, HOST, () => {
   console.log(`🦊 ugcImages server is running at on port ${PORT_CDN_UGCIMAGES}...`);
