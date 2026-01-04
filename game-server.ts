@@ -3538,23 +3538,49 @@ const server = createServer(async (req, res) => {
       return;
     }
 
-    const response = await app.fetch(req);
-    res.writeHead(response.status, Object.fromEntries(response.headers));
+    // Convert Node.js request to Web API Request
+    const url = `http://${req.headers.host || 'localhost'}${req.url}`;
+    let body: ReadableStream | undefined;
+
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      // Convert incoming request body to ReadableStream
+      body = new ReadableStream({
+        start(controller) {
+          req.on('data', chunk => controller.enqueue(chunk));
+          req.on('end', () => controller.close());
+          req.on('error', err => controller.error(err));
+        }
+      });
+    }
+
+    const webRequest = new Request(url, {
+      method: req.method,
+      headers: req.headers as any,
+      body: body
+    });
+
+    // Get response from Elysia
+    const response = await app.fetch(webRequest);
+
+    // Convert Web API Response to Node.js response
+    const headers = {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Profile',
+      ...Object.fromEntries(response.headers)
+    };
+
+    res.writeHead(response.status, headers);
+
     if (response.body) {
       const reader = response.body.getReader();
-      const pump = async () => {
+      while (true) {
         const { done, value } = await reader.read();
-        if (done) {
-          res.end();
-          return;
-        }
+        if (done) break;
         res.write(value);
-        pump();
-      };
-      pump();
-    } else {
-      res.end();
+      }
     }
+    res.end();
   } catch (error) {
     console.error('Server error:', error);
     res.writeHead(500, { 'Content-Type': 'text/plain' });
@@ -3664,7 +3690,14 @@ const app_areaBundles = new Elysia()
 // Start AreaBundles server with Node.js HTTP server
 const server_areaBundles = createServer(async (req, res) => {
   try {
-    const response = await app_areaBundles.fetch(req);
+    // Convert Node.js request to Web API Request
+    const url = `http://${req.headers.host || 'localhost'}${req.url}`;
+    const webRequest = new Request(url, {
+      method: req.method,
+      headers: req.headers as any
+    });
+
+    const response = await app_areaBundles.fetch(webRequest);
     res.writeHead(response.status, Object.fromEntries(response.headers));
     if (response.body) {
       const reader = response.body.getReader();
@@ -3734,7 +3767,14 @@ const app_thingDefs = new Elysia()
 // Start ThingDefs server with Node.js HTTP server
 const server_thingDefs = createServer(async (req, res) => {
   try {
-    const response = await app_thingDefs.fetch(req);
+    // Convert Node.js request to Web API Request
+    const url = `http://${req.headers.host || 'localhost'}${req.url}`;
+    const webRequest = new Request(url, {
+      method: req.method,
+      headers: req.headers as any
+    });
+
+    const response = await app_thingDefs.fetch(webRequest);
     res.writeHead(response.status, Object.fromEntries(response.headers));
     if (response.body) {
       const reader = response.body.getReader();
@@ -3799,7 +3839,14 @@ const app_ugcImages = new Elysia()
 // Start UGC Images server with Node.js HTTP server
 const server_ugcImages = createServer(async (req, res) => {
   try {
-    const response = await app_ugcImages.fetch(req);
+    // Convert Node.js request to Web API Request
+    const url = `http://${req.headers.host || 'localhost'}${req.url}`;
+    const webRequest = new Request(url, {
+      method: req.method,
+      headers: req.headers as any
+    });
+
+    const response = await app_ugcImages.fetch(webRequest);
     res.writeHead(response.status, Object.fromEntries(response.headers));
     if (response.body) {
       const reader = response.body.getReader();
