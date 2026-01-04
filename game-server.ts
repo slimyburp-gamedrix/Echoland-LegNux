@@ -30,6 +30,18 @@ function createFileHandle(filePath: string) {
   };
 }
 
+// Helper function for cross-platform header access (Bun vs Node.js)
+function getHeader(request: any, headerName: string): string | undefined {
+  if (request.headers?.get) {
+    // Bun/Web API style
+    return request.headers.get(headerName);
+  } else if (request.headers && typeof request.headers === 'object') {
+    // Node.js style - headers is a plain object
+    return request.headers[headerName.toLowerCase()];
+  }
+  return undefined;
+}
+
 // Simple mutex for preventing concurrent account.json modifications
 class AsyncMutex {
   private mutex = Promise.resolve();
@@ -857,8 +869,8 @@ const app = new Elysia()
   .onRequest(async ({ request }) => {
     console.info(JSON.stringify({
       ts: new Date().toISOString(),
-      ip: request.headers.get('X-Real-Ip'),
-      ua: request.headers.get("User-Agent"),
+      ip: getHeader(request, 'X-Real-Ip'),
+      ua: getHeader(request, "User-Agent"),
       method: request.method,
       url: request.url,
     }));
@@ -1125,7 +1137,7 @@ const app = new Elysia()
 
       // Get profile from header, query param, or body
       let profileName =
-        request.headers.get("X-Profile") ||
+        getHeader(request, "X-Profile") ||
         (request.url ? new URL(request.url).searchParams.get("profile") : null) ||
         (body && typeof body === "object" && "profile" in body ? (body as any).profile : null) ||
         null;
@@ -3598,8 +3610,8 @@ const app_areaBundles = new Elysia()
     console.info(JSON.stringify({
       server: "AREABUNDLES",
       ts: new Date().toISOString(),
-      ip: request.headers.get('X-Real-Ip'),
-      ua: request.headers.get("User-Agent"),
+      ip: getHeader(request, 'X-Real-Ip'),
+      ua: getHeader(request, "User-Agent"),
       method: request.method,
       url: request.url,
     }));
@@ -3639,8 +3651,8 @@ const app_thingDefs = new Elysia()
     console.info(JSON.stringify({
       server: "THINGDEFS",
       ts: new Date().toISOString(),
-      ip: request.headers.get('X-Real-Ip'),
-      ua: request.headers.get("User-Agent"),
+      ip: getHeader(request, 'X-Real-Ip'),
+      ua: getHeader(request, "User-Agent"),
       method: request.method,
       url: request.url,
     }));
@@ -3690,8 +3702,8 @@ const app_ugcImages = new Elysia()
     console.info(JSON.stringify({
       server: "UGCIMAGES",
       ts: new Date().toISOString(),
-      ip: request.headers.get('X-Real-Ip'),
-      ua: request.headers.get("User-Agent"),
+      ip: getHeader(request, 'X-Real-Ip'),
+      ua: getHeader(request, "User-Agent"),
       method: request.method,
       url: request.url,
     }));
