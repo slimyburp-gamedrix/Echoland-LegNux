@@ -3482,15 +3482,21 @@ import { watch } from "fs";
 const areaFolder = "./data/area/info/";
 let debounceTimer;
 
-watch(areaFolder, { recursive: true }, (eventType, filename) => {
-  console.log(`[Area Watcher] Detected ${eventType} on ${filename}`);
+// Only enable file watching on platforms that support it (Bun or newer Node.js)
+try {
+  watch(areaFolder, { recursive: true }, (eventType, filename) => {
+    console.log(`[Area Watcher] Detected ${eventType} on ${filename}`);
 
-  clearTimeout(debounceTimer);
-  debounceTimer = setTimeout(async () => {
-    console.log("[Area Watcher] Rebuilding area index...");
-    await rebuildAreaIndex(); // Make sure this function exists
-  }, 1000); // Wait 1 second after last change
-});
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(async () => {
+      console.log("[Area Watcher] Rebuilding area index...");
+      await rebuildAreaIndex(); // Make sure this function exists
+    }, 1000); // Wait 1 second after last change
+  });
+  console.log("[Area Watcher] File watcher enabled");
+} catch (error) {
+  console.log("[Area Watcher] File watching not supported on this platform - index will not auto-update");
+}
 
 import { readdir, readFile } from "fs/promises";
 
