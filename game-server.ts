@@ -198,9 +198,9 @@ async function initDefaults() {
     accountData = JSON.parse(await fs.readFile(accountPath, "utf-8"));
   } catch {
     // Create new identity
-    const personId = crypto.randomUUID().replace(/-/g, "").slice(0, 24);
+    const personId = randomUUID().replace(/-/g, "").slice(0, 24);
     const screenName = "User" + Math.floor(Math.random() * 10000);
-    const homeAreaId = crypto.randomUUID().replace(/-/g, "").slice(0, 24);
+    const homeAreaId = randomUUID().replace(/-/g, "").slice(0, 24);
 
     accountData = {
       personId,
@@ -266,7 +266,7 @@ async function initDefaults() {
   // Create default home area
   const areaId = accountData.homeAreaId;
   const areaName = `${accountData.screenName}'s home`;
-  const areaKey = `rr${crypto.randomUUID().replace(/-/g, "").slice(0, 24)}`;
+  const areaKey = `rr${randomUUID().replace(/-/g, "").slice(0, 24)}`;
   const initDefaultsBundleFolder = `./data/area/bundle/${areaId}`;
   await fs.mkdir(initDefaultsBundleFolder, { recursive: true });
   const initDefaultsBundlePath = `${initDefaultsBundleFolder}/${areaKey}.json`;
@@ -314,7 +314,7 @@ async function initDefaults() {
     requestorIsOwner: true,
     placements: [
       {
-        Id: crypto.randomUUID().replace(/-/g, "").slice(0, 24),
+        Id: randomUUID().replace(/-/g, "").slice(0, 24),
         Tid: "000000000000000000000001", // Ground object ID
         P: { x: 0, y: -0.3, z: 0 },
         R: { x: 0, y: 0, z: 0 }
@@ -369,8 +369,8 @@ async function saveAccountData(profileName: string, data: Record<string, any>): 
 }
 
 async function createProfileAccount(profileName: string): Promise<Record<string, any>> {
-  const personId = crypto.randomUUID().replace(/-/g, "").slice(0, 24);
-  const homeAreaId = crypto.randomUUID().replace(/-/g, "").slice(0, 24);
+  const personId = randomUUID().replace(/-/g, "").slice(0, 24);
+  const homeAreaId = randomUUID().replace(/-/g, "").slice(0, 24);
   const accountData = {
     personId,
     screenName: profileName,
@@ -421,7 +421,7 @@ async function ensureHomeArea(account: Record<string, any>) {
 
   const areaId = account.homeAreaId;
   const areaName = `${account.screenName}'s home`;
-  const areaKey = `rr${crypto.randomUUID().replace(/-/g, "").slice(0, 24)}`;
+  const areaKey = `rr${randomUUID().replace(/-/g, "").slice(0, 24)}`;
 
   const setupClientProfileBundleFolder = `./data/area/bundle/${areaId}`;
   await fs.mkdir(setupClientProfileBundleFolder, { recursive: true });
@@ -470,7 +470,7 @@ async function ensureHomeArea(account: Record<string, any>) {
     requestorIsOwner: true,
     placements: [
       {
-        Id: crypto.randomUUID().replace(/-/g, "").slice(0, 24),
+        Id: randomUUID().replace(/-/g, "").slice(0, 24),
         Tid: "000000000000000000000001",
         P: { x: 0, y: -0.3, z: 0 },
         R: { x: 0, y: 0, z: 0 }
@@ -1715,7 +1715,7 @@ const app = new Elysia()
       // ✅ If bundle missing or key malformed, regenerate
       const isMalformed = !areaKey.startsWith("rr") || areaKey.length !== 26;
       if (!bundleExists || isMalformed) {
-        const newKey = `rr${crypto.randomUUID().replace(/-/g, "").slice(0, 24)}`;
+        const newKey = `rr${randomUUID().replace(/-/g, "").slice(0, 24)}`;
         const newBundlePath = `${bundlePath}/${newKey}.json`;
 
         await fs.mkdir(bundlePath, { recursive: true });
@@ -1758,7 +1758,7 @@ const app = new Elysia()
       return new Response("Could not load valid account identity", { status: 500 });
     }
 
-    const generateId = () => crypto.randomUUID().replace(/-/g, "").slice(0, 24);
+    const generateId = () => randomUUID().replace(/-/g, "").slice(0, 24);
     const areaId = generateId();
     const bundleKey = `rr${generateId()}`;
     const basePath = "./data/area";
