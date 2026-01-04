@@ -30,18 +30,6 @@ function createFileHandle(filePath: string) {
   };
 }
 
-// Helper function for cross-platform header access (Bun vs Node.js)
-function getHeader(request: any, headerName: string): string | undefined {
-  if (request.headers?.get) {
-    // Bun/Web API style
-    return request.headers.get(headerName);
-  } else if (request.headers && typeof request.headers === 'object') {
-    // Node.js style - headers is a plain object
-    return request.headers[headerName.toLowerCase()];
-  }
-  return undefined;
-}
-
 // Simple mutex for preventing concurrent account.json modifications
 class AsyncMutex {
   private mutex = Promise.resolve();
@@ -74,8 +62,7 @@ const LEGACY_ACCOUNT_PATH = "./data/person/account.json";
 
 // Track the currently active profile (for Unity clients that don't send cookies)
 let currentActiveProfile: string | null = null;
-
-// Track the next client profile to auto-assign
+// Track pre-selected profile for next client connection
 let nextClientProfile: string | null = null;
 
 function getAccountPathForProfile(profileName: string): string {
@@ -118,7 +105,7 @@ const PORT_CDN_AREABUNDLES = Number(process.env.PORT_CDN_AREABUNDLES ?? 8002);
 const PORT_CDN_UGCIMAGES = Number(process.env.PORT_CDN_UGCIMAGES ?? 8003);
 
 const getDynamicAreaList = async () => {
-  const arealistPath = "./data/area/arealist.json";
+  const arealistPath = "/app/data/area/arealist.json";
   try {
     const file = createFileHandle(arealistPath);
     if (await file.exists()) {
@@ -209,9 +196,9 @@ async function initDefaults() {
     accountData = JSON.parse(await fs.readFile(accountPath, "utf-8"));
   } catch {
     // Create new identity
-    const personId = crypto.randomUUID().replace(/-/g, "").slice(0, 24);
+    const personId = randomUUID().replace(/-/g, "").slice(0, 24);
     const screenName = "User" + Math.floor(Math.random() * 10000);
-    const homeAreaId = crypto.randomUUID().replace(/-/g, "").slice(0, 24);
+    const homeAreaId = randomUUID().replace(/-/g, "").slice(0, 24);
 
     accountData = {
       personId,
@@ -277,11 +264,11 @@ async function initDefaults() {
   // Create default home area
   const areaId = accountData.homeAreaId;
   const areaName = `${accountData.screenName}'s home`;
-  const areaKey = `rr${crypto.randomUUID().replace(/-/g, "").slice(0, 24)}`;
-  const initDefaultsBundleFolder = `./data/area/bundle/${areaId}`;
-  await fs.mkdir(initDefaultsBundleFolder, { recursive: true });
-  const initDefaultsBundlePath = `${initDefaultsBundleFolder}/${areaKey}.json`;
-  await fs.writeFile(initDefaultsBundlePath, JSON.stringify({ thingDefinitions: [], serveTime: 0 }, null, 2));
+  const areaKey = `rr${randomUUID().replace(/-/g, "").slice(0, 24)}`;
+  const bundleFolder = `./data/area/bundle/${areaId}`;
+  await fs.mkdir(bundleFolder, { recursive: true });
+  const bundlePath = `${bundleFolder}/${areaKey}.json`;
+  await fs.writeFile(bundlePath, JSON.stringify({ thingDefinitions: [], serveTime: 0 }, null, 2));
   const subareaPath = `./data/area/subareas/${areaId}.json`;
   await fs.writeFile(subareaPath, JSON.stringify({ subareas: [] }, null, 2));
 
@@ -325,7 +312,7 @@ async function initDefaults() {
     requestorIsOwner: true,
     placements: [
       {
-        Id: crypto.randomUUID().replace(/-/g, "").slice(0, 24),
+        Id: randomUUID().replace(/-/g, "").slice(0, 24),
         Tid: "000000000000000000000001", // Ground object ID
         P: { x: 0, y: -0.3, z: 0 },
         R: { x: 0, y: 0, z: 0 }
@@ -345,12 +332,6 @@ async function initDefaults() {
 
   await fs.writeFile(`./data/area/info/${areaId}.json`, JSON.stringify(areaInfo, null, 2));
   await fs.writeFile(`./data/area/load/${areaId}.json`, JSON.stringify(areaLoad, null, 2));
-
-  // Create bundle in subfolder with proper structure: bundle/{areaId}/{bundleKey}.json
-  const ensureHomeAreaBundleFolder = `./data/area/bundle/${areaId}`;
-  await fs.mkdir(ensureHomeAreaBundleFolder, { recursive: true });
-  const ensureHomeAreaBundlePath = `${ensureHomeAreaBundleFolder}/${areaKey}.json`;
-  await fs.writeFile(ensureHomeAreaBundlePath, JSON.stringify(areaBundle, null, 2));
 
   console.log(`🌍 Created default home area for ${accountData.screenName}`);
 }
@@ -380,8 +361,8 @@ async function saveAccountData(profileName: string, data: Record<string, any>): 
 }
 
 async function createProfileAccount(profileName: string): Promise<Record<string, any>> {
-  const personId = crypto.randomUUID().replace(/-/g, "").slice(0, 24);
-  const homeAreaId = crypto.randomUUID().replace(/-/g, "").slice(0, 24);
+  const personId = randomUUID().replace(/-/g, "").slice(0, 24);
+  const homeAreaId = randomUUID().replace(/-/g, "").slice(0, 24);
   const accountData = {
     personId,
     screenName: profileName,
@@ -432,12 +413,12 @@ async function ensureHomeArea(account: Record<string, any>) {
 
   const areaId = account.homeAreaId;
   const areaName = `${account.screenName}'s home`;
-  const areaKey = `rr${crypto.randomUUID().replace(/-/g, "").slice(0, 24)}`;
+  const areaKey = `rr${randomUUID().replace(/-/g, "").slice(0, 24)}`;
 
-  const setupClientProfileBundleFolder = `./data/area/bundle/${areaId}`;
-  await fs.mkdir(setupClientProfileBundleFolder, { recursive: true });
-  const setupClientProfileBundlePath = `${setupClientProfileBundleFolder}/${areaKey}.json`;
-  await fs.writeFile(setupClientProfileBundlePath, JSON.stringify({ thingDefinitions: [], serveTime: 0 }, null, 2));
+  const bundleFolder = `./data/area/bundle/${areaId}`;
+  await fs.mkdir(bundleFolder, { recursive: true });
+  const bundlePath = `${bundleFolder}/${areaKey}.json`;
+  await fs.writeFile(bundlePath, JSON.stringify({ thingDefinitions: [], serveTime: 0 }, null, 2));
   const subareaPath = `./data/area/subareas/${areaId}.json`;
   await fs.writeFile(subareaPath, JSON.stringify({ subareas: [] }, null, 2));
 
@@ -481,7 +462,7 @@ async function ensureHomeArea(account: Record<string, any>) {
     requestorIsOwner: true,
     placements: [
       {
-        Id: crypto.randomUUID().replace(/-/g, "").slice(0, 24),
+        Id: randomUUID().replace(/-/g, "").slice(0, 24),
         Tid: "000000000000000000000001",
         P: { x: 0, y: -0.3, z: 0 },
         R: { x: 0, y: 0, z: 0 }
@@ -502,12 +483,6 @@ async function ensureHomeArea(account: Record<string, any>) {
   await fs.writeFile(`./data/area/info/${areaId}.json`, JSON.stringify(areaInfo, null, 2));
   await fs.writeFile(`./data/area/load/${areaId}.json`, JSON.stringify(areaLoad, null, 2));
 
-  // Create bundle in subfolder with proper structure: bundle/{areaId}/{bundleKey}.json
-  const createAreaBundleFolder = `./data/area/bundle/${areaId}`;
-  await fs.mkdir(createAreaBundleFolder, { recursive: true });
-  const createAreaBundlePath = `${createAreaBundleFolder}/${areaKey}.json`;
-  await fs.writeFile(createAreaBundlePath, JSON.stringify(areaBundle, null, 2));
-
   await injectInitialAreaToList(areaId, areaName);
 
   // ✅ Update in-memory area index (so home area is accessible without server restart)
@@ -521,7 +496,19 @@ async function ensureHomeArea(account: Record<string, any>) {
   areaByUrlName.set(areaUrlName, areaId);
   console.log(`[HOME AREA] ✅ Added home area ${areaId} to in-memory index`);
 
+  // Save updated index to cache
+  await saveAreaIndexToCache();
+
   console.log(`🌍 Created default home area for ${account.screenName}`);
+}
+
+// Helper function to get current active profile's account data
+async function getCurrentProfileAccount(): Promise<Record<string, any> | null> {
+  if (!currentActiveProfile) {
+    console.warn("⚠️ No active profile set, cannot load account data");
+    return null;
+  }
+  return await loadAccountData(currentActiveProfile);
 }
 
 async function setupClientProfile(profileName: string): Promise<Record<string, any>> {
@@ -666,7 +653,7 @@ if (areaIndex.length === 0) {
   }
 
   console.log("done");
-  await fs.mkdir("./cache", { recursive: true });
+  await fs.mkdir("./cache", { recursive: true, mode: 0o755 });
   await fs.writeFile("./cache/areaIndex.json", JSON.stringify(areaIndex));
 }
 
@@ -687,6 +674,31 @@ interface ThingIndexEntry {
 const thingIndex: ThingIndexEntry[] = [];
 const THING_INDEX_CACHE = "./cache/thingIndex.json";
 
+// Ensure cache directory exists with proper permissions
+console.log("Setting up cache directory...");
+try {
+  await fs.mkdir("./cache", { recursive: true, mode: 0o755 });
+
+  // Try to fix permissions on existing cache files
+  try {
+    const cacheFiles = await fs.readdir("./cache");
+    for (const file of cacheFiles) {
+      const filePath = `./cache/${file}`;
+      try {
+        await fs.chmod(filePath, 0o644);
+      } catch (chmodError) {
+        console.warn(`⚠️ Could not fix permissions on ${filePath}:`, chmodError);
+      }
+    }
+  } catch (readdirError) {
+    // Directory might not exist yet, that's fine
+  }
+
+  console.log("✓ Cache directory ready");
+} catch (error) {
+  console.warn("⚠️ Could not create cache directory:", error);
+}
+
 console.log("Building thing search index...");
 const thingCacheFile = createFileHandle(THING_INDEX_CACHE);
 
@@ -694,20 +706,21 @@ if (await thingCacheFile.exists()) {
   console.log("Loading thing index from cache...");
   try {
     const cached = await thingCacheFile.json();
-    if (Array.isArray(cached) && cached.length > 0) {
-      // Validate that cached data has the expected structure
-      const sampleEntry = cached[0];
-      if (sampleEntry && typeof sampleEntry.id === 'string' && typeof sampleEntry.name === 'string') {
-        thingIndex.push(...cached);
-        console.log(`✓ Loaded ${thingIndex.length} things from cache`);
-      } else {
-        throw new Error("Invalid cache entry structure");
-      }
+    if (Array.isArray(cached)) {
+      thingIndex.push(...cached);
+      console.log(`✓ Loaded ${thingIndex.length} things from cache`);
     } else {
-      throw new Error("Invalid cache format or empty array");
+      throw new Error("Invalid cache format");
     }
   } catch (error) {
-    console.log(`Thing cache invalid (${error.message}), rebuilding...`);
+    console.log("Thing cache invalid or locked, rebuilding...");
+    // Try to remove the corrupted cache file
+    try {
+      await fs.unlink(THING_INDEX_CACHE);
+      console.log("✓ Removed corrupted cache file");
+    } catch (unlinkError) {
+      console.warn("⚠️ Could not remove corrupted cache file:", unlinkError);
+    }
   }
 }
 
@@ -723,21 +736,14 @@ if (thingIndex.length === 0) {
     
     console.log(`Found ${totalFiles} thing files to process...`);
     
-    // Process files in batches to manage memory usage
-    const batchSize = 1000;
-    for (let batchStart = 0; batchStart < files.length; batchStart += batchSize) {
-      const batchEnd = Math.min(batchStart + batchSize, files.length);
-      const batch = files.slice(batchStart, batchEnd);
-
-      for (let i = 0; i < batch.length; i++) {
-        const file = batch[i];
-        const globalIndex = batchStart + i;
-
-        // Progress logging every 5000 files (like area index)
-        if (globalIndex % 5000 === 0) {
-          const percent = ((globalIndex / totalFiles) * 100).toFixed(1);
-          console.log(`Indexed ${globalIndex}/${totalFiles} things (${percent}%)...`);
-        }
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      
+      // Progress logging every 5000 files (like area index)
+      if (i % 5000 === 0) {
+        const percent = ((i / totalFiles) * 100).toFixed(1);
+        console.log(`Indexed ${i}/${totalFiles} things (${percent}%)...`);
+      }
       
       if (!file.endsWith(".json")) continue;
       
@@ -746,14 +752,14 @@ if (thingIndex.length === 0) {
       try {
         const raw = await fs.readFile(path.join(infoDir, file), "utf-8");
         const info = JSON.parse(raw);
-
+        
         // Only index things that are not unlisted (include all, even with placedCount=0)
         if (!info || typeof info !== "object") continue;
         if (info.isUnlisted === true) continue;
-
+        
         // Use "thing" as default name if none provided
         const name = typeof info.name === "string" && info.name.trim() ? info.name.trim().toLowerCase() : "thing";
-
+        
         // Try to get tags
         let tags: string[] = [];
         try {
@@ -763,62 +769,22 @@ if (thingIndex.length === 0) {
             tags = tagData.tags.map((t: string) => t.toLowerCase());
           }
         } catch {
-          // No tags file - this is normal
+          // No tags file
         }
-
-        // Validate the entry before adding
-        if (!thingId || typeof thingId !== 'string') {
-          console.warn(`Skipping invalid thingId: ${thingId}`);
-          continue;
-        }
-
-        const entry = { id: thingId, name, tags };
-        thingIndex.push(entry);
+        
+        thingIndex.push({ id: thingId, name, tags });
         indexed++;
-
-        // Periodic memory check (every 10000 entries)
-        if (indexed % 10000 === 0) {
-          console.log(`Memory check: ${indexed} entries indexed, ${(process.memoryUsage().heapUsed / 1024 / 1024).toFixed(1)}MB heap used`);
-        }
-
-      } catch (fileError) {
-        // Log file processing errors but continue
-        if (indexed % 1000 === 0) { // Only log every 1000 errors to avoid spam
-          console.warn(`Error processing thing file ${file}:`, fileError.message);
-        }
-      }
-      }
-
-      // Force garbage collection between batches (if available)
-      if (global.gc) {
-        global.gc();
+      } catch {
+        // Skip invalid files
       }
     }
     
     console.log(`✓ Indexed ${indexed} searchable things out of ${totalFiles} total (100%)`);
-
-    // Validate the index before saving
-    if (thingIndex.length === 0) {
-      throw new Error("No things were indexed");
-    }
-
+    
     // Save to cache
-    try {
-      await fs.mkdir("./cache", { recursive: true });
-      const jsonData = JSON.stringify(thingIndex, null, 2); // Pretty print for debugging
-      await fs.writeFile(THING_INDEX_CACHE, jsonData);
-      console.log("✓ Thing index saved to cache");
-
-      // Verify the save worked
-      const verifyFile = createFileHandle(THING_INDEX_CACHE);
-      const verifyData = await verifyFile.json();
-      if (!Array.isArray(verifyData) || verifyData.length !== thingIndex.length) {
-        throw new Error("Cache verification failed");
-      }
-    } catch (saveError) {
-      console.error("Failed to save thing index cache:", saveError);
-      throw saveError;
-    }
+    await fs.mkdir("./cache", { recursive: true, mode: 0o755 });
+    await fs.writeFile(THING_INDEX_CACHE, JSON.stringify(thingIndex), { mode: 0o644 });
+    console.log("✓ Thing index saved to cache");
   } catch (err) {
     console.error("Failed to build thing index:", err);
   }
@@ -869,14 +835,19 @@ const app = new Elysia()
   .onRequest(async ({ request }) => {
     console.info(JSON.stringify({
       ts: new Date().toISOString(),
-      ip: getHeader(request, 'X-Real-Ip'),
-      ua: getHeader(request, "User-Agent"),
+      ip: request.headers.get('X-Real-Ip'),
+      ua: request.headers.get("User-Agent"),
       method: request.method,
       url: request.url,
     }));
   })
-  .onError(({ code, error }) => {
-    console.info("error in middleware!", code, error.message);
+  .onError(async ({ code, error, request }) => {
+    console.info("error in middleware!", request.url, code);
+    console.log(error);
+  })
+  .onTransform(({ request, path, body, params }) => {
+    // Match Redux server's simple logging
+    console.log(request.method, path, { body, params })
   })
 
   .get("/admin", async () => {
@@ -956,11 +927,15 @@ const app = new Elysia()
     <div class="card">
       <h2>Profiles (${profiles.length})</h2>
       <div>${profileList}</div>
+      ${nextProfileHtml}
       <form class="inline" action="/admin/create-profile" method="GET">
         <input type="text" name="name" placeholder="New profile name" required />
         <button type="submit">Create</button>
       </form>
-      ${nextProfileHtml}
+      <form class="inline" action="/admin/clear-cache" method="GET" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.1);">
+        <button type="submit" style="background: #dc2626;" onclick="return confirm('This will delete all cached data and require a server restart to rebuild. Continue?')">Clear All Cache</button>
+        <span style="color: #8a93a6; font-size: 14px; margin-left: 12px;">Forces rebuild of thing and area indexes on next server start</span>
+      </form>
     </div>
   </div>
   <script>
@@ -1021,6 +996,50 @@ const app = new Elysia()
 </html>`;
     return new Response(html, { headers: { "Content-Type": "text/html" } });
   })
+  .get("/admin/clear-cache", async () => {
+    try {
+      // Clear thing cache
+      if (await fs.stat(THING_INDEX_CACHE).catch(() => null)) {
+        await fs.unlink(THING_INDEX_CACHE);
+      }
+
+      // Clear area cache
+      if (await fs.stat("./cache/areaIndex.json").catch(() => null)) {
+        await fs.unlink("./cache/areaIndex.json");
+      }
+
+      return Response.redirect("/admin?message=Cache cleared - restart server to rebuild");
+    } catch (error) {
+      console.error("Failed to clear cache:", error);
+      return Response.redirect("/admin?error=Failed to clear cache");
+    }
+  })
+  .get("/admin/set-next-profile", async ({ query, request }) => {
+    const profile = (query.profile || "").trim();
+    if (profile) {
+      nextClientProfile = profile;
+      console.log(`[ADMIN] Pre-selected profile for next client: ${profile}`);
+      notifyProfileChange();
+    }
+    // Redirect back to admin
+    const url = new URL(request.url);
+    url.pathname = "/admin";
+    return Response.redirect(url.toString(), 302);
+  }, {
+    query: t.Object({
+      profile: t.Optional(t.String())
+    })
+  })
+  .get("/admin/clear-next-profile", async ({ request }) => {
+    nextClientProfile = null;
+    console.log(`[ADMIN] Cleared pre-selected profile for next client`);
+    notifyProfileChange();
+    // Redirect back to admin
+    const url = new URL(request.url);
+    url.pathname = "/admin";
+    return Response.redirect(url.toString(), 302);
+  })
+
   .get("/admin/assign", async ({ query }) => {
     const clientId = query.clientId;
     let profileName = (query.profile || query.newProfile || "").trim();
@@ -1044,34 +1063,20 @@ const app = new Elysia()
       newProfile: t.Optional(t.String())
     })
   })
-  .get("/admin/create-profile", async ({ query }) => {
+  .get("/admin/create-profile", async ({ query, request }) => {
     const name = (query.name || "").trim();
     if (name) {
       await setupClientProfile(name);
       console.log(`[ADMIN] Created profile ${name}`);
     }
-    return Response.redirect("/admin", 302);
+    // Construct full URL for redirect
+    const url = new URL(request.url);
+    url.pathname = "/admin";
+    return Response.redirect(url.toString(), 302);
   }, {
     query: t.Object({
       name: t.Optional(t.String())
     })
-  })
-  .get("/admin/set-next-profile", async ({ query }) => {
-    const profileName = (query.profile || "").trim();
-    if (profileName) {
-      nextClientProfile = profileName;
-      console.log(`[ADMIN] Set next client profile to: ${profileName}`);
-    }
-    return Response.redirect("/admin", 302);
-  }, {
-    query: t.Object({
-      profile: t.Optional(t.String())
-    })
-  })
-  .get("/admin/clear-next-profile", async () => {
-    nextClientProfile = null;
-    console.log(`[ADMIN] Cleared next client profile`);
-    return Response.redirect("/admin", 302);
   })
   .get("/api/profiles", async () => {
     const profiles = await listProfiles();
@@ -1132,7 +1137,7 @@ const app = new Elysia()
 
       // Get profile from header, query param, or body
       let profileName =
-        getHeader(request, "X-Profile") ||
+        request.headers.get("X-Profile") ||
         (request.url ? new URL(request.url).searchParams.get("profile") : null) ||
         (body && typeof body === "object" && "profile" in body ? (body as any).profile : null) ||
         null;
@@ -1140,9 +1145,11 @@ const app = new Elysia()
       // If no profile specified, check if there's a pre-selected profile for next client
       if (!profileName) {
         if (nextClientProfile) {
-          console.log(`[AUTH] Auto-assigning pre-selected profile: ${nextClientProfile}`);
+          console.log(`[AUTH] Using pre-selected profile: ${nextClientProfile}`);
           profileName = nextClientProfile;
-          nextClientProfile = null; // Clear after use
+          // Clear the pre-selection after use
+          nextClientProfile = null;
+          notifyProfileChange(); // Update admin panel
         } else {
           // Wait for admin to assign one
           const clientId = `client-${++pendingClientCounter}`;
@@ -1393,54 +1400,27 @@ const app = new Elysia()
         const filePath = path.resolve("./data/area/load/", areaId + ".json");
         const file = createFileHandle(filePath);
         console.log(`[AREA LOAD] Checking file: ${filePath}`);
-
+        
         if (await file.exists()) {
           try {
             const areaData = await file.json();
             console.log(`[AREA LOAD] ✅ Successfully loaded area ${areaId} (${areaData.areaName || 'unnamed'})`);
-
+            
             // Also verify the bundle exists
             const bundlePath = path.resolve("./data/area/bundle/", areaId, (areaData.areaKey || '') + ".json");
             const bundleFile = createFileHandle(bundlePath);
             const bundleExists = await bundleFile.exists();
             console.log(`[AREA LOAD] Bundle ${areaData.areaKey} exists: ${bundleExists}`);
-
-            // Check if current user has edit permissions
-            let hasEditPermission = false;
-            let isOwner = false;
-
-            try {
-              // Load area info to check editors
-              const areaInfoPath = path.resolve("./data/area/info/", areaId + ".json");
-              const areaInfoFile = createFileHandle(areaInfoPath);
-              if (await areaInfoFile.exists()) {
-                const areaInfo = await areaInfoFile.json();
-                // Load current user account
-                const accountPath = "./data/person/account.json";
-                const account = JSON.parse(await fs.readFile(accountPath, "utf-8"));
-                const currentUserId = account.personId;
-
-                // Check if user is in editors list
-                hasEditPermission = areaInfo.editors?.some((editor: any) => editor.id === currentUserId) || false;
-                isOwner = areaInfo.editors?.some((editor: any) => editor.id === currentUserId && editor.isOwner) || false;
-
-                console.log(`[AREA LOAD] User ${currentUserId} has edit permission: ${hasEditPermission}, is owner: ${isOwner}`);
-              } else {
-                console.warn(`[AREA LOAD] Area info file not found for ${areaId}, defaulting to no edit permission`);
-              }
-            } catch (err) {
-              console.warn(`[AREA LOAD] Could not check edit permissions for area ${areaId}:`, err);
-            }
-
+            
             return {
               ...areaData,
-              forceEditMode: hasEditPermission,
-              requestorIsEditor: hasEditPermission,
-              requestorIsListEditor: hasEditPermission,
-              requestorIsOwner: isOwner,
-              hasEditTools: hasEditPermission,
-              hasEditToolsPermanently: hasEditPermission,
-              editToolsExpiryDate: hasEditPermission ? null : undefined,
+              forceEditMode: true,
+              requestorIsEditor: true,
+              requestorIsListEditor: true,
+              requestorIsOwner: true,
+              hasEditTools: true,
+              hasEditToolsPermanently: true,
+              editToolsExpiryDate: null,
               isInEditToolsTrial: false,
               wasEditToolsTrialEverActivated: false
             };
@@ -1502,53 +1482,16 @@ const app = new Elysia()
     },
     { body: t.Object({ areaId: t.String() }) }
   )
-  .get("/area/random", async () => {
-    try {
-      // Get all available areas from the index
-      if (areaIndex.length === 0) {
-        return new Response(JSON.stringify({
-          ok: false,
-          error: "No areas available"
-        }), {
-          status: 404,
-          headers: { "Content-Type": "application/json" }
-        });
-      }
-
-      // Pick a random area
-      const randomIndex = Math.floor(Math.random() * areaIndex.length);
-      const randomArea = areaIndex[randomIndex];
-
-      console.log(`[AREA RANDOM] Selected area: ${randomArea.name} (${randomArea.id})`);
-
-      // Return area info in the format expected by the client
-      return {
-        areaId: randomArea.id,
-        areaName: randomArea.name,
-        areaUrlName: randomArea.name.replace(/[^-_a-z0-9]/gi, "").toLowerCase(),
-        ok: true
-      };
-    } catch (error) {
-      console.error("[AREA RANDOM] Error:", error);
-      return new Response(JSON.stringify({
-        ok: false,
-        error: "Failed to get random area"
-      }), {
-        status: 500,
-        headers: { "Content-Type": "application/json" }
-      });
-    }
-  })
   .post("/area/save",
     async ({ body }) => {
       const areaId = body.id || generateObjectId();
       const filePath = `./data/area/load/${areaId}.json`;
 
       await fs.mkdir("./data/area/load", { recursive: true });
-      // Align creator identity with account.json (same as /area route)
+      // Align creator identity with current profile account (same as /area route)
       let creatorId = body.creatorId;
       try {
-        const account = JSON.parse(await fs.readFile("./data/person/account.json", "utf-8"));
+        const account = await getCurrentProfileAccount();
         if (account?.personId) creatorId = account.personId;
       } catch { }
       const sanitizedBody = {
@@ -1721,7 +1664,7 @@ const app = new Elysia()
       // ✅ If bundle missing or key malformed, regenerate
       const isMalformed = !areaKey.startsWith("rr") || areaKey.length !== 26;
       if (!bundleExists || isMalformed) {
-        const newKey = `rr${crypto.randomUUID().replace(/-/g, "").slice(0, 24)}`;
+        const newKey = `rr${randomUUID().replace(/-/g, "").slice(0, 24)}`;
         const newBundlePath = `${bundlePath}/${newKey}.json`;
 
         await fs.mkdir(bundlePath, { recursive: true });
@@ -1748,23 +1691,26 @@ const app = new Elysia()
       return new Response("Missing area name", { status: 400 });
     }
 
-    // ✅ Load identity from account.json
+    // ✅ Load identity from current profile account
     let personId: string;
     let personName: string;
 
     try {
-      const account = JSON.parse(await fs.readFile("./data/person/account.json", "utf-8"));
+      const account = await getCurrentProfileAccount();
+      if (!account) {
+        throw new Error("No active profile account found");
+      }
       personId = account.personId;
       personName = account.screenName;
 
       if (!personId || !personName) {
-        throw new Error("Missing personId or screenName in account.json");
+        throw new Error("Missing personId or screenName in profile account");
       }
     } catch {
       return new Response("Could not load valid account identity", { status: 500 });
     }
 
-    const generateId = () => crypto.randomUUID().replace(/-/g, "").slice(0, 24);
+    const generateId = () => randomUUID().replace(/-/g, "").slice(0, 24);
     const areaId = generateId();
     const bundleKey = `rr${generateId()}`;
     const basePath = "./data/area";
@@ -1933,6 +1879,9 @@ const app = new Elysia()
     areaByUrlName.set(areaUrlName, areaId);
     console.log(`[AREA CREATE] ✅ Added area ${areaId} (${areaName}) to in-memory index`);
 
+    // Save updated index to cache
+    await saveAreaIndexToCache();
+
     return new Response(JSON.stringify({ id: areaId }), {
       status: 200,
       headers: { "Content-Type": "application/json" }
@@ -2088,7 +2037,7 @@ const app = new Elysia()
     const { areaId, name } = body;
     if (!areaId || !name) return new Response("Missing data", { status: 400 });
 
-    const listPath = "./data/area/arealist.json";
+    const listPath = "/app/data/area/arealist.json";
     const areaList = await getDynamicAreaList();
     const alreadyVisited = areaList.visited.some(a => a.id === areaId);
 
@@ -2118,11 +2067,16 @@ const app = new Elysia()
     const placementId = parsed.Id;
     const placementPath = `./data/placement/info/${areaId}/${placementId}.json`;
 
-    // Inject identity from account.json
+    // Inject identity from current profile account
     try {
-      const account = JSON.parse(await fs.readFile("./data/person/account.json", "utf-8"));
-      parsed.placerId = account.personId || "unknown";
-      parsed.placerName = account.screenName || "anonymous";
+      const account = await getCurrentProfileAccount();
+      if (account) {
+        parsed.placerId = account.personId || "unknown";
+        parsed.placerName = account.screenName || "anonymous";
+      } else {
+        parsed.placerId = "unknown";
+        parsed.placerName = "anonymous";
+      }
     } catch {
       parsed.placerId = "unknown";
       parsed.placerName = "anonymous";
@@ -2197,9 +2151,14 @@ const app = new Elysia()
     }
 
     try {
-      const account = JSON.parse(await fs.readFile("./data/person/account.json", "utf-8"));
-      data.placerId = account.personId || "unknown";
-      data.placerName = account.screenName || "anonymous";
+      const account = await getCurrentProfileAccount();
+      if (account) {
+        data.placerId = account.personId || "unknown";
+        data.placerName = account.screenName || "anonymous";
+      } else {
+        data.placerId = "unknown";
+        data.placerName = "anonymous";
+      }
     } catch {
       data.placerId = "unknown";
       data.placerName = "anonymous";
@@ -2262,9 +2221,14 @@ const app = new Elysia()
     const placementPath = `./data/placement/info/${areaId}/${placementId}.json`;
 
     try {
-      const account = JSON.parse(await fs.readFile("./data/person/account.json", "utf-8"));
-      parsed.placerId = account.personId || "unknown";
-      parsed.placerName = account.screenName || "anonymous";
+      const account = await getCurrentProfileAccount();
+      if (account) {
+        parsed.placerId = account.personId || "unknown";
+        parsed.placerName = account.screenName || "anonymous";
+      } else {
+        parsed.placerId = "unknown";
+        parsed.placerName = "anonymous";
+      }
     } catch {
       parsed.placerId = "unknown";
       parsed.placerName = "anonymous";
@@ -2312,9 +2276,11 @@ const app = new Elysia()
     let personId = "unknown";
     let screenName = "anonymous";
     try {
-      const account = JSON.parse(await fs.readFile("./data/person/account.json", "utf-8"));
-      personId = account.personId || personId;
-      screenName = account.screenName || screenName;
+      const account = await getCurrentProfileAccount();
+      if (account) {
+        personId = account.personId || personId;
+        screenName = account.screenName || screenName;
+      }
     } catch { }
 
     const newPlacements = placements.map((encoded: string) => {
@@ -2886,15 +2852,19 @@ const app = new Elysia()
       thingName = body.name;
     }
 
-    // ✅ Load identity from account.json
+    // ✅ Load identity from current profile's account
     let creatorId = "unknown";
     let creatorName = "anonymous";
     try {
-      const account = JSON.parse(await fs.readFile("./data/person/account.json", "utf-8"));
-      creatorId = account.personId || creatorId;
-      creatorName = account.screenName || creatorName;
+      const account = await getCurrentProfileAccount();
+      if (account) {
+        creatorId = account.personId || creatorId;
+        creatorName = account.screenName || creatorName;
+      } else {
+        console.warn("⚠️ No active profile account found for thing creation");
+      }
     } catch (e) {
-      console.warn("⚠️ Could not load account.json for object metadata.", e);
+      console.warn("⚠️ Could not load current profile account for object metadata.", e);
     }
 
     // ✅ Build thinginfo object
@@ -3262,7 +3232,10 @@ const app = new Elysia()
       });
     } catch {
       console.warn(`⚠️ /thing/info/${params.id} → not found`);
-      return new Response("{}", { status: 404 });
+      return new Response("null", {
+        status: 404,
+        headers: { "Content-Type": "application/json" }
+      });
     }
   })
 
@@ -3278,7 +3251,10 @@ const app = new Elysia()
       });
     } catch {
       console.warn(`⚠️ /thing/def/${params.id} → not found`);
-      return new Response("{}", { status: 404 });
+      return new Response("null", {
+        status: 404,
+        headers: { "Content-Type": "application/json" }
+      });
     }
   })
   .post("/thing/fixmissinginfo", async () => {
@@ -3456,7 +3432,13 @@ const app = new Elysia()
   })
   .post("/thing/topby", async () => {
     // Return top things created by the current user
-    const account = JSON.parse(await fs.readFile("./data/person/account.json", "utf-8"));
+    const account = await getCurrentProfileAccount();
+    if (!account) {
+      return new Response(JSON.stringify({ ids: [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
     const personId = account.personId;
     const file = createFileHandle(`./data/person/topby/${personId}.json`);
 
@@ -3525,11 +3507,79 @@ const app = new Elysia()
   )
   .get("/forum/forum/:id", ({ params: { id } }) => createFileHandle(path.resolve("./data/forum/forum/", id + ".json")).json())
   .get("/forum/thread/:id", ({ params: { id } }) => createFileHandle(path.resolve("./data/forum/thread/", id + ".json")).json())
-  .onError(({ code, error }) => {
-    console.info("error in middleware!", code, error.message);
-  });
 
-const server = createServer(app.fetch);
+// Use Node.js HTTP server with Web API Request conversion
+const server = createServer(async (req, res) => {
+  try {
+    // Handle CORS preflight requests
+    if (req.method === 'OPTIONS') {
+      res.writeHead(200, {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Profile',
+        'Content-Length': '0'
+      });
+      res.end();
+      return;
+    }
+
+    // Convert Node.js request to Web API Request
+    const url = `http://${req.headers.host || 'localhost'}${req.url}`;
+    let body: ReadableStream | undefined;
+
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      // Convert incoming request body to ReadableStream
+      body = new ReadableStream({
+        start(controller) {
+          req.on('data', chunk => controller.enqueue(chunk));
+          req.on('end', () => controller.close());
+          req.on('error', err => controller.error(err));
+        }
+      });
+    }
+
+    const webRequest = new Request(url, {
+      method: req.method,
+      headers: req.headers as any,
+      body: body
+    });
+
+    // Get response from Elysia
+    const response = await app.fetch(webRequest);
+
+    // Convert Web API Response to Node.js response
+    const headers = {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Profile',
+      ...Object.fromEntries(response.headers)
+    };
+
+    const statusCode = response.status;
+
+    // Handle response body
+    if (response.body) {
+      const responseText = await response.text();
+      headers['Content-Length'] = Buffer.byteLength(responseText, 'utf8').toString();
+
+      res.writeHead(statusCode, headers);
+      res.end(responseText);
+    } else {
+      headers['Content-Length'] = '0';
+      res.writeHead(statusCode, headers);
+      res.end();
+    }
+
+  } catch (error) {
+    console.error('Server error:', error);
+    res.writeHead(500, {
+      'Content-Type': 'text/plain',
+      'Access-Control-Allow-Origin': '*',
+      'Content-Length': '21'
+    });
+    res.end('Internal Server Error');
+  }
+});
 
 server.listen(PORT_API, HOST, () => {
   console.log(`🚀 API server is running on port ${PORT_API}...`);
@@ -3541,7 +3591,6 @@ import { watch } from "fs";
 const areaFolder = "./data/area/info/";
 let debounceTimer;
 
-// Only enable file watching on platforms that support it (Bun or newer Node.js)
 try {
   watch(areaFolder, { recursive: true }, (eventType, filename) => {
     console.log(`[Area Watcher] Detected ${eventType} on ${filename}`);
@@ -3552,12 +3601,24 @@ try {
       await rebuildAreaIndex(); // Make sure this function exists
     }, 1000); // Wait 1 second after last change
   });
-  console.log("[Area Watcher] File watcher enabled");
+  console.log("[Area Watcher] File watching enabled - area index will auto-rebuild on changes");
 } catch (error) {
-  console.log("[Area Watcher] File watching not supported on this platform - index will not auto-update");
+  console.log("[Area Watcher] Recursive file watching not supported on this platform - manual index rebuild required");
+  console.log("To rebuild the index manually, restart the server");
 }
 
 import { readdir, readFile } from "fs/promises";
+
+// Function to save area index to cache
+async function saveAreaIndexToCache() {
+  try {
+    await fs.mkdir("./cache", { recursive: true, mode: 0o755 });
+    await fs.writeFile("./cache/areaIndex.json", JSON.stringify(areaIndex), { mode: 0o644 });
+    console.log("✅ Area index saved to cache");
+  } catch (error) {
+    console.error("❌ Failed to save area index to cache:", error);
+  }
+}
 
 async function rebuildAreaIndex() {
   const areaDir = path.resolve("./data/area/info/");
@@ -3604,8 +3665,8 @@ const app_areaBundles = new Elysia()
     console.info(JSON.stringify({
       server: "AREABUNDLES",
       ts: new Date().toISOString(),
-      ip: getHeader(request, 'X-Real-Ip'),
-      ua: getHeader(request, "User-Agent"),
+      ip: request.headers['X-Real-Ip'],
+      ua: request.headers["User-Agent"],
       method: request.method,
       url: request.url,
     }));
@@ -3626,11 +3687,26 @@ const app_areaBundles = new Elysia()
       }
     },
   )
-  .onError(({ code, error }) => {
-    console.info("error in middleware!", code, error.message);
-  });
-
-const server_areaBundles = createServer(app_areaBundles.fetch);
+// Start AreaBundles server with Node.js HTTP server
+const server_areaBundles = createServer(async (req, res) => {
+  try {
+    const response = await app_areaBundles.fetch(req);
+    res.writeHead(response.status, Object.fromEntries(response.headers));
+    if (response.body) {
+      const reader = response.body.getReader();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        res.write(value);
+      }
+    }
+    res.end();
+  } catch (error) {
+    console.error('AreaBundles server error:', error);
+    res.writeHead(500, { 'Content-Type': 'text/plain' });
+    res.end('Internal Server Error');
+  }
+});
 
 server_areaBundles.listen(PORT_CDN_AREABUNDLES, HOST, () => {
   console.log(`🦊 AreaBundles server is running at on port ${PORT_CDN_AREABUNDLES}...`);
@@ -3644,8 +3720,8 @@ const app_thingDefs = new Elysia()
     console.info(JSON.stringify({
       server: "THINGDEFS",
       ts: new Date().toISOString(),
-      ip: getHeader(request, 'X-Real-Ip'),
-      ua: getHeader(request, "User-Agent"),
+      ip: request.headers['X-Real-Ip'],
+      ua: request.headers["User-Agent"],
       method: request.method,
       url: request.url,
     }));
@@ -3677,11 +3753,26 @@ const app_thingDefs = new Elysia()
 
     }
   )
-  .onError(({ code, error }) => {
-    console.info("error in middleware!", code, error.message);
-  });
-
-const server_thingDefs = createServer(app_thingDefs.fetch);
+// Start ThingDefs server with Node.js HTTP server
+const server_thingDefs = createServer(async (req, res) => {
+  try {
+    const response = await app_thingDefs.fetch(req);
+    res.writeHead(response.status, Object.fromEntries(response.headers));
+    if (response.body) {
+      const reader = response.body.getReader();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        res.write(value);
+      }
+    }
+    res.end();
+  } catch (error) {
+    console.error('ThingDefs server error:', error);
+    res.writeHead(500, { 'Content-Type': 'text/plain' });
+    res.end('Internal Server Error');
+  }
+});
 
 server_thingDefs.listen(PORT_CDN_THINGDEFS, HOST, () => {
   console.log(`🦊 ThingDefs server is running at on port ${PORT_CDN_THINGDEFS}...`);
@@ -3694,8 +3785,8 @@ const app_ugcImages = new Elysia()
     console.info(JSON.stringify({
       server: "UGCIMAGES",
       ts: new Date().toISOString(),
-      ip: getHeader(request, 'X-Real-Ip'),
-      ua: getHeader(request, "User-Agent"),
+      ip: request.headers['X-Real-Ip'],
+      ua: request.headers["User-Agent"],
       method: request.method,
       url: request.url,
     }));
@@ -3723,11 +3814,26 @@ const app_ugcImages = new Elysia()
 
     }
   )
-  .onError(({ code, error }) => {
-    console.info("error in middleware!", code, error.message);
-  });
-
-const server_ugcImages = createServer(app_ugcImages.fetch);
+// Start UGC Images server with Node.js HTTP server
+const server_ugcImages = createServer(async (req, res) => {
+  try {
+    const response = await app_ugcImages.fetch(req);
+    res.writeHead(response.status, Object.fromEntries(response.headers));
+    if (response.body) {
+      const reader = response.body.getReader();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        res.write(value);
+      }
+    }
+    res.end();
+  } catch (error) {
+    console.error('UGC Images server error:', error);
+    res.writeHead(500, { 'Content-Type': 'text/plain' });
+    res.end('Internal Server Error');
+  }
+});
 
 server_ugcImages.listen(PORT_CDN_UGCIMAGES, HOST, () => {
   console.log(`🦊 ugcImages server is running at on port ${PORT_CDN_UGCIMAGES}...`);
