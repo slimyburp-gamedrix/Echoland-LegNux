@@ -5,6 +5,7 @@
   "main": "game-server.ts",
   "scripts": {
     "start": "bun game-server.ts",
+    "start:node": "tsx game-server.ts",
     "dev": "bun --watch game-server.ts",
     "test": "echo \"Error: no test specified\" && exit 1",
     "build:linux": "bun build --compile --target=bun-linux-x64 ./game-server.ts --outfile build/echoland-server-linux-x64",

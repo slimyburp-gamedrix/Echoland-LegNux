@@ -2,6 +2,33 @@ import * as path from "node:path"
 import { Elysia, t } from 'elysia'
 import * as fs from "node:fs/promises";
 import { AreaInfoSchema } from "./lib/schemas";
+import { createServer } from 'node:http';
+import { randomUUID } from 'node:crypto';
+
+// Helper function to replace createFileHandle() functionality
+function createFileHandle(filePath: string) {
+  return {
+    async exists(): Promise<boolean> {
+      try {
+        await fs.access(filePath);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    async json(): Promise<any> {
+      const content = await fs.readFile(filePath, 'utf-8');
+      return JSON.parse(content);
+    },
+    async text(): Promise<string> {
+      return await fs.readFile(filePath, 'utf-8');
+    },
+    async arrayBuffer(): Promise<ArrayBuffer> {
+      const buffer = await fs.readFile(filePath);
+      return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
+    }
+  };
+}
 
 // Simple mutex for preventing concurrent account.json modifications
 class AsyncMutex {
@@ -72,16 +99,16 @@ async function syncLegacyToProfile(profileName: string): Promise<void> {
   }
 }
 
-const HOST = Bun.env.HOST ?? "0.0.0.0";
-const PORT_API = Number(Bun.env.PORT_API ?? 8000);
-const PORT_CDN_THINGDEFS = Number(Bun.env.PORT_CDN_THINGDEFS ?? 8001);
-const PORT_CDN_AREABUNDLES = Number(Bun.env.PORT_CDN_AREABUNDLES ?? 8002);
-const PORT_CDN_UGCIMAGES = Number(Bun.env.PORT_CDN_UGCIMAGES ?? 8003);
+const HOST = process.env.HOST ?? "0.0.0.0";
+const PORT_API = Number(process.env.PORT_API ?? 8000);
+const PORT_CDN_THINGDEFS = Number(process.env.PORT_CDN_THINGDEFS ?? 8001);
+const PORT_CDN_AREABUNDLES = Number(process.env.PORT_CDN_AREABUNDLES ?? 8002);
+const PORT_CDN_UGCIMAGES = Number(process.env.PORT_CDN_UGCIMAGES ?? 8003);
 
 const getDynamicAreaList = async () => {
   const arealistPath = "./data/area/arealist.json";
   try {
-    const file = Bun.file(arealistPath);
+    const file = createFileHandle(arealistPath);
     if (await file.exists()) {
       const parsed = await file.json();
       return {
@@ -140,7 +167,7 @@ async function injectInitialAreaToList(areaId: string, areaName: string) {
 
   let areaList: any = {};
   try {
-    const listFile = Bun.file(listPath);
+    const listFile = createFileHandle(listPath);
     if (await listFile.exists()) {
       areaList = await listFile.json();
     }
@@ -548,7 +575,7 @@ const areaIndex: { name: string, description?: string, id: string, playerCount: 
 const areaByUrlName = new Map<string, string>()
 
 console.log("building area index...")
-const cacheFile = Bun.file("./cache/areaIndex.json");
+const cacheFile = createFileHandle("./cache/areaIndex.json");
 
 if (await cacheFile.exists()) {
   console.log("Loading area index from cache...");
@@ -603,7 +630,7 @@ if (areaIndex.length === 0) {
       console.log(`Indexed ${i} files...`);
     }
 
-    const file = Bun.file(path.join("./data/area/info", filename));
+    const file = createFileHandle(path.join("./data/area/info", filename));
     if (!await file.exists()) continue;
 
     try {
@@ -628,7 +655,7 @@ if (areaIndex.length === 0) {
 
   console.log("done");
   await fs.mkdir("./cache", { recursive: true });
-  await Bun.write("./cache/areaIndex.json", JSON.stringify(areaIndex));
+  await fs.writeFile("./cache/areaIndex.json", JSON.stringify(areaIndex));
 }
 
 const searchArea = (term: string) => {
@@ -649,7 +676,7 @@ const thingIndex: ThingIndexEntry[] = [];
 const THING_INDEX_CACHE = "./cache/thingIndex.json";
 
 console.log("Building thing search index...");
-const thingCacheFile = Bun.file(THING_INDEX_CACHE);
+const thingCacheFile = createFileHandle(THING_INDEX_CACHE);
 
 if (await thingCacheFile.exists()) {
   console.log("Loading thing index from cache...");
@@ -725,7 +752,7 @@ if (thingIndex.length === 0) {
     
     // Save to cache
     await fs.mkdir("./cache", { recursive: true });
-    await Bun.write(THING_INDEX_CACHE, JSON.stringify(thingIndex));
+    await fs.writeFile(THING_INDEX_CACHE, JSON.stringify(thingIndex));
     console.log("✓ Thing index saved to cache");
   } catch (err) {
     console.error("Failed to build thing index:", err);
@@ -760,7 +787,7 @@ try {
   let alreadyExists = false;
 
   try {
-    const areaList = await Bun.file(listPath).json();
+    const areaList = await createFileHandle(listPath).json();
     alreadyExists = areaList.created?.some((a: any) => a.id === defaultAreaId);
   } catch { }
 
@@ -1304,7 +1331,7 @@ const app = new Elysia()
       
       if (areaId) {
         const filePath = path.resolve("./data/area/load/", areaId + ".json");
-        const file = Bun.file(filePath);
+        const file = createFileHandle(filePath);
         console.log(`[AREA LOAD] Checking file: ${filePath}`);
 
         if (await file.exists()) {
@@ -1314,7 +1341,7 @@ const app = new Elysia()
 
             // Also verify the bundle exists
             const bundlePath = path.resolve("./data/area/bundle/", areaId, (areaData.areaKey || '') + ".json");
-            const bundleFile = Bun.file(bundlePath);
+            const bundleFile = createFileHandle(bundlePath);
             const bundleExists = await bundleFile.exists();
             console.log(`[AREA LOAD] Bundle ${areaData.areaKey} exists: ${bundleExists}`);
 
@@ -1325,7 +1352,7 @@ const app = new Elysia()
             try {
               // Load area info to check editors
               const areaInfoPath = path.resolve("./data/area/info/", areaId + ".json");
-              const areaInfoFile = Bun.file(areaInfoPath);
+              const areaInfoFile = createFileHandle(areaInfoPath);
               if (await areaInfoFile.exists()) {
                 const areaInfo = await areaInfoFile.json();
                 // Load current user account
@@ -1372,7 +1399,7 @@ const app = new Elysia()
 
         if (foundAreaId) {
           const filePath = path.resolve("./data/area/load/" + foundAreaId + ".json");
-          const file = Bun.file(filePath);
+          const file = createFileHandle(filePath);
           
           if (await file.exists()) {
             console.log(`[AREA LOAD] ✅ Found and loading area by URL name: ${areaUrlName}`);
@@ -1397,7 +1424,7 @@ const app = new Elysia()
     "/area/info",
     async ({ body: { areaId } }) => {
       const filePath = path.resolve("./data/area/info/", areaId + ".json");
-      const file = Bun.file(filePath);
+      const file = createFileHandle(filePath);
       
       if (await file.exists()) {
         try {
@@ -1469,7 +1496,7 @@ const app = new Elysia()
         creatorId
       };
 
-      await Bun.write(filePath, JSON.stringify(sanitizedBody));
+      await fs.writeFile(filePath, JSON.stringify(sanitizedBody));
 
 
 
@@ -1480,7 +1507,7 @@ const app = new Elysia()
         playerCount: 0
       });
       areaByUrlName.set(body.name.replace(/[^-_a-z0-9]/g, ""), areaId);
-      await Bun.write("./cache/areaIndex.json", JSON.stringify(areaIndex));
+      await fs.writeFile("./cache/areaIndex.json", JSON.stringify(areaIndex));
 
       return { ok: true, id: areaId };
     },
@@ -1489,7 +1516,7 @@ const app = new Elysia()
   .post(
     "/area/getsubareas",
     async ({ body: { areaId } }) => {
-      const file = Bun.file(path.resolve("./data/area/subareas/", areaId + ".json"))
+      const file = createFileHandle(path.resolve("./data/area/subareas/", areaId + ".json"))
       if (await file.exists()) {
         return await file.json()
       }
@@ -1503,7 +1530,7 @@ const app = new Elysia()
     "/area/search",
     async ({ body: { term, byCreatorId } }) => {
       if (byCreatorId) {
-        const file = Bun.file(path.resolve("./data/person/areasearch/", byCreatorId + ".json"))
+        const file = createFileHandle(path.resolve("./data/person/areasearch/", byCreatorId + ".json"))
 
         if (await file.exists()) {
           return await file.json()
@@ -1618,7 +1645,7 @@ const app = new Elysia()
       const bundlePath = `${areaBase}/bundle/${homeId}`;
 
       // ✅ Load area
-      const loadFile = Bun.file(loadPath);
+      const loadFile = createFileHandle(loadPath);
       if (!(await loadFile.exists())) {
         return new Response("Home area load file missing", { status: 404 });
       }
@@ -1628,7 +1655,7 @@ const app = new Elysia()
 
       // ✅ Check if bundle file exists
       const bundleFilePath = `${bundlePath}/${areaKey}.json`;
-      const bundleFile = Bun.file(bundleFilePath);
+      const bundleFile = createFileHandle(bundleFilePath);
       const bundleExists = await bundleFile.exists();
 
       // ✅ If bundle missing or key malformed, regenerate
@@ -1768,7 +1795,7 @@ const app = new Elysia()
     const indexPath = "./cache/areaindex.json";
     let currentIndex: any[] = [];
     try {
-      const indexFile = Bun.file(indexPath);
+      const indexFile = createFileHandle(indexPath);
       if (await indexFile.exists()) {
         const parsed = await indexFile.json();
         if (Array.isArray(parsed)) currentIndex = parsed;
@@ -1790,7 +1817,7 @@ const app = new Elysia()
     const listPath = `${basePath}/arealist.json`;
     let areaList: any = {};
     try {
-      const listFile = Bun.file(listPath);
+      const listFile = createFileHandle(listPath);
       if (await listFile.exists()) {
         areaList = await listFile.json();
       }
@@ -1820,7 +1847,7 @@ const app = new Elysia()
     // ✅ Inject area into account.json under ownedAreas
     const accountPath = await getAccountPath();
     try {
-      const accountFile = Bun.file(accountPath);
+      const accountFile = createFileHandle(accountPath);
       let accountData = await accountFile.json();
 
       accountData.ownedAreas = [...new Set([...(accountData.ownedAreas ?? []), areaId])];
@@ -1875,7 +1902,7 @@ const app = new Elysia()
 		const infoPath = `./data/area/info/${areaId}.json`;
 		
 		try {
-			const loadFile = Bun.file(loadPath);
+			const loadFile = createFileHandle(loadPath);
 			if (!await loadFile.exists()) {
 				return new Response("Area not found", { status: 404 });
 			}
@@ -1953,11 +1980,11 @@ const app = new Elysia()
 			
 			// Write updated data back to load file
 			if (updated) {
-				await Bun.write(loadPath, JSON.stringify(areaData, null, 2));
+				await fs.writeFile(loadPath, JSON.stringify(areaData, null, 2));
 				
 				// Also update info file if it exists
 				try {
-					const infoFile = Bun.file(infoPath);
+					const infoFile = createFileHandle(infoPath);
 					if (await infoFile.exists()) {
 						const infoData = await infoFile.json();
 						
@@ -1966,7 +1993,7 @@ const app = new Elysia()
 						if (isCopyable !== undefined) infoData.isCopyable = areaData.isCopyable;
 						if (isExcluded !== undefined) infoData.isExcluded = areaData.isExcluded;
 						
-						await Bun.write(infoPath, JSON.stringify(infoData, null, 2));
+						await fs.writeFile(infoPath, JSON.stringify(infoData, null, 2));
 					}
 				} catch (infoError) {
 					console.warn(`[AREA SETTINGS] Could not update info file for ${areaId}:`, infoError);
@@ -2044,7 +2071,7 @@ const app = new Elysia()
     parsed.placedDaysAgo = 0;
 
     await fs.mkdir(`./data/placement/info/${areaId}`, { recursive: true });
-    await Bun.write(placementPath, JSON.stringify(parsed, null, 2));
+    await fs.writeFile(placementPath, JSON.stringify(parsed, null, 2));
 
     const areaFilePath = `./data/area/load/${areaId}.json`;
     let areaData: Record<string, any> = {};
@@ -2122,7 +2149,7 @@ const app = new Elysia()
     await fs.mkdir(dirPath, { recursive: true });
 
     const filePath = path.join(dirPath, placementId + ".json");
-    await Bun.write(filePath, JSON.stringify(data));
+    await fs.writeFile(filePath, JSON.stringify(data));
 
     return { ok: true };
   }, {
@@ -2183,7 +2210,7 @@ const app = new Elysia()
       parsed.placerName = "anonymous";
     }
 
-    await Bun.write(placementPath, JSON.stringify(parsed, null, 2));
+    await fs.writeFile(placementPath, JSON.stringify(parsed, null, 2));
 
     const areaFilePath = `./data/area/load/${areaId}.json`;
     let areaData: Record<string, any> = {};
@@ -2249,7 +2276,7 @@ const app = new Elysia()
     for (const placement of newPlacements) {
       const placementPath = `./data/placement/info/${areaId}/${placement.Id}.json`;
       await fs.mkdir(`./data/placement/info/${areaId}`, { recursive: true });
-      await Bun.write(placementPath, JSON.stringify(placement, null, 2));
+      await fs.writeFile(placementPath, JSON.stringify(placement, null, 2));
     }
 
     const existingIds = new Set(areaData.placements.map((p: any) => p.Id));
@@ -2378,7 +2405,7 @@ const app = new Elysia()
   })
   .post("person/info",
     async ({ body: { areaId, userId } }) => {
-      const file = Bun.file(path.resolve("./data/person/info/", userId + ".json"))
+      const file = createFileHandle(path.resolve("./data/person/info/", userId + ".json"))
 
       if (await file.exists()) {
         return await file.json()
@@ -2448,7 +2475,7 @@ const app = new Elysia()
     const invPath = `./data/person/inventory/${personId}.json`;
     let items: string[] = [];
     try {
-      const file = Bun.file(invPath);
+      const file = createFileHandle(invPath);
       if (await file.exists()) {
         const data = await file.json();
         if (Array.isArray(data?.ids)) items = data.ids;
@@ -3371,7 +3398,7 @@ const app = new Elysia()
     // Return top things created by the current user
     const account = JSON.parse(await fs.readFile("./data/person/account.json", "utf-8"));
     const personId = account.personId;
-    const file = Bun.file(`./data/person/topby/${personId}.json`);
+    const file = createFileHandle(`./data/person/topby/${personId}.json`);
 
     if (await file.exists()) {
       const data = await file.json();
@@ -3387,7 +3414,7 @@ const app = new Elysia()
     }
   })
   .post("/thing/topCreatedByPerson", async ({ body: { id } }) => {
-    const file = Bun.file(`./data/person/topby/${id}.json`);
+    const file = createFileHandle(`./data/person/topby/${id}.json`);
 
     if (await file.exists()) {
       const data = await file.json();
@@ -3405,14 +3432,14 @@ const app = new Elysia()
     body: t.Object({ id: t.String() })
   })
   //.get("/thing/info/:thingId",
-  //({params: { thingId }}) => Bun.file(path.resolve("./data/thing/info/", thingId + ".json")).json(),
+  //({params: { thingId }}) => createFileHandle(path.resolve("./data/thing/info/", thingId + ".json")).json(),
   //)
   .get("/thing/sl/tdef/:thingId",
-    ({ params: { thingId } }) => Bun.file(path.resolve("./data/thing/def/", thingId + ".json")).json(),
+    ({ params: { thingId } }) => createFileHandle(path.resolve("./data/thing/def/", thingId + ".json")).json(),
   )
   .post(
     "/thing/gettags",
-    ({ body: { thingId } }) => Bun.file(path.resolve("./data/thing/tags/", thingId + ".json")).json(),
+    ({ body: { thingId } }) => createFileHandle(path.resolve("./data/thing/tags/", thingId + ".json")).json(),
     { body: t.Object({ thingId: t.String() }) }
   )
   .post(
@@ -3422,7 +3449,7 @@ const app = new Elysia()
   )
   .post(
     "/gift/getreceived",
-    ({ body: { userId } }) => Bun.file(path.resolve("./data/person/gift/", userId + ".json")),
+    ({ body: { userId } }) => createFileHandle(path.resolve("./data/person/gift/", userId + ".json")),
     { body: t.Object({ userId: t.String() }) }
   )
   .post("/ach/reg", () => {
@@ -3436,12 +3463,18 @@ const app = new Elysia()
       return canned_forums_favorites
     }
   )
-  .get("/forum/forum/:id", ({ params: { id } }) => Bun.file(path.resolve("./data/forum/forum/", id + ".json")).json())
-  .get("/forum/thread/:id", ({ params: { id } }) => Bun.file(path.resolve("./data/forum/thread/", id + ".json")).json())
-  .listen({
-    hostname: HOST,
-    port: PORT_API,
-  })
+  .get("/forum/forum/:id", ({ params: { id } }) => createFileHandle(path.resolve("./data/forum/forum/", id + ".json")).json())
+  .get("/forum/thread/:id", ({ params: { id } }) => createFileHandle(path.resolve("./data/forum/thread/", id + ".json")).json())
+  .onError(({ code, error }) => {
+    console.info("error in middleware!", code, error.message);
+    return new Response('Internal Server Error', { status: 500 });
+  });
+
+const server = createServer(app.fetch);
+
+server.listen(PORT_API, HOST, () => {
+  console.log(`🚀 API server is running on port ${PORT_API}...`);
+});
 
 // Watch for changes in area files and rebuild index
 import { watch } from "fs";
@@ -3500,7 +3533,6 @@ async function rebuildAreaIndex() {
   }
 }
 
-console.log(`🦊 API server is running at on port ${app.server?.port}...`)
 
 const app_areaBundles = new Elysia()
   .onRequest(({ request }) => {
@@ -3519,7 +3551,7 @@ const app_areaBundles = new Elysia()
   .get(
     "/:areaId/:areaKey", // TODO: areaKeys all seem to start with "rr"
     async ({ params: { areaId, areaKey } }) => {
-      const file = Bun.file(path.resolve("./data/area/bundle/", areaId, areaKey + ".json"));
+      const file = createFileHandle(path.resolve("./data/area/bundle/", areaId, areaKey + ".json"));
 
       if (await file.exists()) {
         return await file.json()
@@ -3529,12 +3561,16 @@ const app_areaBundles = new Elysia()
       }
     },
   )
-  .listen({
-    hostname: HOST,
-    port: PORT_CDN_AREABUNDLES
-  })
-  ;
-console.log(`🦊 AreaBundles server is running at on port ${app_areaBundles.server?.port}...`)
+  .onError(({ code, error }) => {
+    console.info("error in middleware!", code, error.message);
+    return new Response('Internal Server Error', { status: 500 });
+  });
+
+const server_areaBundles = createServer(app_areaBundles.fetch);
+
+server_areaBundles.listen(PORT_CDN_AREABUNDLES, HOST, () => {
+  console.log(`🦊 AreaBundles server is running at on port ${PORT_CDN_AREABUNDLES}...`);
+});
 
 
 const app_thingDefs = new Elysia()
@@ -3557,7 +3593,7 @@ const app_thingDefs = new Elysia()
     "/:thingId",
     async ({ params: { thingId } }) => {
       console.log(`[THINGDEFS] 🔍 Looking for: ${thingId}`);
-      const file = Bun.file(path.resolve("./data/thing/def/", thingId + ".json"));
+      const file = createFileHandle(path.resolve("./data/thing/def/", thingId + ".json"));
       if (await file.exists()) {
         try {
           const def = await file.json();
@@ -3577,12 +3613,16 @@ const app_thingDefs = new Elysia()
 
     }
   )
-  .listen({
-    hostname: HOST,
-    port: PORT_CDN_THINGDEFS,
-  })
-  ;
-console.log(`🦊 ThingDefs server is running at on port ${app_thingDefs.server?.port}...`)
+  .onError(({ code, error }) => {
+    console.info("error in middleware!", code, error.message);
+    return new Response('Internal Server Error', { status: 500 });
+  });
+
+const server_thingDefs = createServer(app_thingDefs.fetch);
+
+server_thingDefs.listen(PORT_CDN_THINGDEFS, HOST, () => {
+  console.log(`🦊 ThingDefs server is running at on port ${PORT_CDN_THINGDEFS}...`);
+});
 
 
 
@@ -3603,7 +3643,7 @@ const app_ugcImages = new Elysia()
   .get(
     "/:part1/:part2/",
     async ({ params: { part1, part2 } }) => {
-      const file = Bun.file(path.resolve("../archiver/images/", `${part1}_${part2}.png`));
+      const file = createFileHandle(path.resolve("../archiver/images/", `${part1}_${part2}.png`));
 
       if (await file.exists()) {
         try {
@@ -3620,12 +3660,16 @@ const app_ugcImages = new Elysia()
 
     }
   )
-  .listen({
-    hostname: HOST,
-    port: PORT_CDN_UGCIMAGES,
-  })
-  ;
-console.log(`🦊 ugcImages server is running at on port ${app_ugcImages.server?.port}...`)
+  .onError(({ code, error }) => {
+    console.info("error in middleware!", code, error.message);
+    return new Response('Internal Server Error', { status: 500 });
+  });
+
+const server_ugcImages = createServer(app_ugcImages.fetch);
+
+server_ugcImages.listen(PORT_CDN_UGCIMAGES, HOST, () => {
+  console.log(`🦊 ugcImages server is running at on port ${PORT_CDN_UGCIMAGES}...`);
+});
 
 
 
