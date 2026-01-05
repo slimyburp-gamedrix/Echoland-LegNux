@@ -1015,22 +1015,31 @@ const app = new Elysia()
 </html>`;
     return new Response(html, { headers: { "Content-Type": "text/html" } });
   })
-  .get("/admin/assign", async ({ query }) => {
+  .get("/admin/assign", async ({ query, request }) => {
     const clientId = query.clientId;
     let profileName = (query.profile || query.newProfile || "").trim();
     if (!clientId || !profileName) {
-      return Response.redirect("/admin", 302);
+      // Construct full URL for redirect
+      const host = request.headers.get('host') || 'localhost:8000';
+      const protocol = host.includes('localhost') ? 'http' : 'https';
+      return Response.redirect(`${protocol}://${host}/admin`, 302);
     }
     const idx = pendingClients.findIndex((c) => c.id === clientId);
     if (idx === -1) {
-      return Response.redirect("/admin", 302);
+      // Construct full URL for redirect
+      const host = request.headers.get('host') || 'localhost:8000';
+      const protocol = host.includes('localhost') ? 'http' : 'https';
+      return Response.redirect(`${protocol}://${host}/admin`, 302);
     }
     await setupClientProfile(profileName);
     const client = pendingClients.splice(idx, 1)[0];
     client.resolve(profileName);
     notifyPendingChange();
     console.log(`[ADMIN] Assigned profile ${profileName} to ${clientId}`);
-    return Response.redirect("/admin", 302);
+    // Construct full URL for redirect
+    const host = request.headers.get('host') || 'localhost:8000';
+    const protocol = host.includes('localhost') ? 'http' : 'https';
+    return Response.redirect(`${protocol}://${host}/admin`, 302);
   }, {
     query: t.Object({
       clientId: t.String(),
@@ -1038,34 +1047,43 @@ const app = new Elysia()
       newProfile: t.Optional(t.String())
     })
   })
-  .get("/admin/create-profile", async ({ query }) => {
+  .get("/admin/create-profile", async ({ query, request }) => {
     const name = (query.name || "").trim();
     if (name) {
       await setupClientProfile(name);
       console.log(`[ADMIN] Created profile ${name}`);
     }
-    return Response.redirect("/admin", 302);
+    // Construct full URL for redirect
+    const host = request.headers.get('host') || 'localhost:8000';
+    const protocol = host.includes('localhost') ? 'http' : 'https';
+    return Response.redirect(`${protocol}://${host}/admin`, 302);
   }, {
     query: t.Object({
       name: t.Optional(t.String())
     })
   })
-  .get("/admin/set-next-profile", async ({ query }) => {
+  .get("/admin/set-next-profile", async ({ query, request }) => {
     const profileName = (query.profile || "").trim();
     if (profileName) {
       nextClientProfile = profileName;
       console.log(`[ADMIN] Set next client profile to: ${profileName}`);
     }
-    return Response.redirect("/admin", 302);
+    // Construct full URL for redirect
+    const host = request.headers.get('host') || 'localhost:8000';
+    const protocol = host.includes('localhost') ? 'http' : 'https';
+    return Response.redirect(`${protocol}://${host}/admin`, 302);
   }, {
     query: t.Object({
       profile: t.Optional(t.String())
     })
   })
-  .get("/admin/clear-next-profile", async () => {
+  .get("/admin/clear-next-profile", async ({ request }) => {
     nextClientProfile = null;
     console.log(`[ADMIN] Cleared next client profile`);
-    return Response.redirect("/admin", 302);
+    // Construct full URL for redirect
+    const host = request.headers.get('host') || 'localhost:8000';
+    const protocol = host.includes('localhost') ? 'http' : 'https';
+    return Response.redirect(`${protocol}://${host}/admin`, 302);
   })
   .get("/api/profiles", async () => {
     const profiles = await listProfiles();
