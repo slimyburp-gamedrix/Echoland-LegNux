@@ -1038,7 +1038,7 @@ const app = new Elysia()
     console.log(`[ADMIN] Assigned profile ${profileName} to ${clientId}`);
     // Construct full URL for redirect
     const host = request.headers.get('host') || 'localhost:8000';
-    const protocol = host.includes('localhost') ? 'http' : 'https';
+    const protocol = 'http'; // Always HTTP for local development
     return Response.redirect(`${protocol}://${host}/admin`, 302);
   }, {
     query: t.Object({
@@ -1055,7 +1055,7 @@ const app = new Elysia()
     }
     // Construct full URL for redirect
     const host = request.headers.get('host') || 'localhost:8000';
-    const protocol = host.includes('localhost') ? 'http' : 'https';
+    const protocol = 'http'; // Always HTTP for local development
     return Response.redirect(`${protocol}://${host}/admin`, 302);
   }, {
     query: t.Object({
@@ -1070,7 +1070,7 @@ const app = new Elysia()
     }
     // Construct full URL for redirect
     const host = request.headers.get('host') || 'localhost:8000';
-    const protocol = host.includes('localhost') ? 'http' : 'https';
+    const protocol = 'http'; // Always HTTP for local development
     return Response.redirect(`${protocol}://${host}/admin`, 302);
   }, {
     query: t.Object({
@@ -1082,7 +1082,7 @@ const app = new Elysia()
     console.log(`[ADMIN] Cleared next client profile`);
     // Construct full URL for redirect
     const host = request.headers.get('host') || 'localhost:8000';
-    const protocol = host.includes('localhost') ? 'http' : 'https';
+    const protocol = 'http'; // Always HTTP for local development
     return Response.redirect(`${protocol}://${host}/admin`, 302);
   })
   .get("/api/profiles", async () => {
@@ -3559,6 +3559,7 @@ const server = createServer(async (req, res) => {
     // Convert Node.js request to Web API Request
     const url = `http://${req.headers.host || 'localhost'}${req.url}`;
     let body: ReadableStream | undefined;
+    let duplex: 'half' | undefined;
 
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       // Convert incoming request body to ReadableStream
@@ -3569,12 +3570,14 @@ const server = createServer(async (req, res) => {
           req.on('error', err => controller.error(err));
         }
       });
+      duplex = 'half'; // Required for Node.js when body is present
     }
 
     const webRequest = new Request(url, {
       method: req.method,
       headers: req.headers as any,
-      body: body
+      body: body,
+      duplex: duplex
     });
 
     // Get response from Elysia
@@ -3712,7 +3715,8 @@ const server_areaBundles = createServer(async (req, res) => {
     const url = `http://${req.headers.host || 'localhost'}${req.url}`;
     const webRequest = new Request(url, {
       method: req.method,
-      headers: req.headers as any
+      headers: req.headers as any,
+      duplex: req.method !== 'GET' && req.method !== 'HEAD' ? 'half' : undefined
     });
 
     const response = await app_areaBundles.fetch(webRequest);
@@ -3789,7 +3793,8 @@ const server_thingDefs = createServer(async (req, res) => {
     const url = `http://${req.headers.host || 'localhost'}${req.url}`;
     const webRequest = new Request(url, {
       method: req.method,
-      headers: req.headers as any
+      headers: req.headers as any,
+      duplex: req.method !== 'GET' && req.method !== 'HEAD' ? 'half' : undefined
     });
 
     const response = await app_thingDefs.fetch(webRequest);
@@ -3861,7 +3866,8 @@ const server_ugcImages = createServer(async (req, res) => {
     const url = `http://${req.headers.host || 'localhost'}${req.url}`;
     const webRequest = new Request(url, {
       method: req.method,
-      headers: req.headers as any
+      headers: req.headers as any,
+      duplex: req.method !== 'GET' && req.method !== 'HEAD' ? 'half' : undefined
     });
 
     const response = await app_ugcImages.fetch(webRequest);
