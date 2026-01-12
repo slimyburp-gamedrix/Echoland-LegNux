@@ -5,6 +5,8 @@
 
 **Echoland** is a server for the defunct VR creation platform Anyland.
 
+**Linux Native Support**: This server now runs natively on Ubuntu/Linux with Node.js, optimized for legacy hardware performance.
+
 ---
 
 ## About
@@ -24,14 +26,16 @@ It's safe to say that now, Anyland will live on—endlessly, openly, and forever
 
 ## Current Features
 
-- Create areas and build items  
-- Multiplayer-friendly server (semi-multiplayer)  
-- Multi-user support with a web-based interface to manage profiles  
-- Inventory system with body attachments  
-- Access to the entire archive (Areas and Things)  
-- Search archived items by name in the inventory  
-- Area features working  
-- Actively in development and open for community contributions  
+- Create areas and build items
+- Multiplayer-friendly server (semi-multiplayer)
+- Multi-user support with a web-based interface to manage profiles
+- Inventory system with body attachments
+- Access to the entire archive (Areas and Things)
+- Search archived items by name in the inventory
+- Area features working
+- Cross-platform support: Runs on Windows (Bun), Linux (Node.js), and Docker
+- Optimized for legacy hardware: Node.js version works great on older Ubuntu systems
+- Actively in development and open for community contributions
 
 *Note: PUN (Photon Unity Networking) is not yet implemented, but can be added easily if desired.*
 
@@ -50,7 +54,9 @@ REnyland isn’t open source (yet) as it’s still being finalized. It runs as a
 
 ## Disclaimer
 
-I take no responsibility if the server breaks or if you lose your in-game progress. Once you’ve downloaded it, it’s all yours.
+I take no responsibility if the server breaks or if you lose your in-game progress. Once you've downloaded it, it's all yours.
+
+**Note for Linux users**: The Node.js version is optimized for Ubuntu and has been tested on legacy hardware. If you encounter any issues, please report them on the GitHub repository.
 
 ---
 
@@ -83,8 +89,8 @@ Watch the recordings here:
 
 ## Development
 
-See [DEVELOPMENT.md](DEVELOPMENT.md) for details.  
-The server is written in TypeScript and runs with Bun. Contributions are welcome.
+See [DEVELOPMENT.md](DEVELOPMENT.md) for details.
+The server is written in TypeScript and supports both Bun (recommended) and Node.js. Contributions are welcome.
 
 ---
 
@@ -96,14 +102,52 @@ The server is written in TypeScript and runs with Bun. Contributions are welcome
 
 ### 1. Choose Your Installation Method
 
-**Echoland can run in two ways:**
+**Echoland supports multiple deployment options:**
 
-#### Option A: Docker (Recommended for beginners)
-- **Windows/Linux**: Install Docker from [https://www.docker.com/get-started](https://www.docker.com/get-started)
+#### Quick Start for Linux Users
+
+If you're on Ubuntu/Linux, follow these steps:
+
+```bash
+# 1. Install Node.js (LTS version)
+curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
+sudo apt-get install -y nodejs
+
+# 2. Install tsx for TypeScript execution
+npm install -g tsx
+
+# 3. Clone and setup the repository
+git clone https://github.com/slimyburp-gamedrix/Echoland-LegNux.git
+cd Echoland-LegNux
+
+# 4. Install dependencies
+npm install
+
+# 5. Download and extract archive data
+# Follow step 3 below to download the data.zip file
+
+# 6. Start the server
+npm run start:node
+```
+
+That's it! Your server will be running on `http://localhost:8000`.
+
+**Available npm scripts:**
+- `npm run start:node` - Run with Node.js (Linux optimized)
+- `npm run start` - Run with Bun (if available)
+- `npm run dev` - Development mode with hot reload
+
+#### Option A: Node.js on Linux (Recommended for Ubuntu/Linux users)
+- **Linux/Ubuntu**: Install Node.js and run natively for optimal performance on legacy hardware
+- Supports both modern and older Ubuntu versions with full Node.js compatibility
+- No Docker overhead, direct system integration
+
+#### Option B: Docker (Cross-platform, beginner-friendly)
+- **Windows/Linux/macOS**: Install Docker from [https://www.docker.com/get-started](https://www.docker.com/get-started)
 - Click **"Start-Server Docker.bat"** to start both services automatically
 
-#### Option B: Direct Installation (Advanced users)
-- **Windows**: Install [Bun](https://bun.sh/) runtime and download [Caddy](https://caddyserver.com/) web server
+#### Option C: Direct Installation with Bun (Advanced users)
+- **Windows/Linux/macOS**: Install [Bun](https://bun.sh/) runtime and download [Caddy](https://caddyserver.com/) web server
 - **Linux**: Run `./install-and-run.sh` to install Bun and start the server
 - Click **"Start-Server.bat"** (Windows) or use the launch scripts to start both game server (Bun) and web server (Caddy)
 
@@ -150,27 +194,54 @@ Extract the `data.zip` contents into your Echoland server folder named `data`.
 
 ### 4. Start the Server
 
-#### If using Docker (Option A):
+#### Linux with Node.js (Option A - Recommended):
+```bash
+# Start the server
+npm run start:node
+
+# Or run directly:
+npx tsx game-server.ts
+```
+The server will automatically index areas and things on first run, then load from cache on subsequent starts.
+
+#### Docker Setup (Option B):
 1. Double-click **"Start-Server Docker.bat"**
 2. Choose option **1** (Start Server) from the menu
 3. Wait for both areas and things indexing to complete
 4. Choose option **6** to view server logs if needed
 5. Open `Echoland-Admin.html` or visit [http://localhost:8000/admin](http://localhost:8000/admin)
 
-#### If using Direct Installation (Option B):
+#### Direct Installation with Bun (Option C):
 1. **Windows**: Double-click **"Start-Server.bat"** (starts both Bun game server and Caddy web server)
 2. **Linux**: Run `./launch-server-linux.sh` to start the game server and `./launch-anyland-linux.sh` for the full setup
 3. Wait for indexing to complete
 4. Visit [http://localhost:8000/admin](http://localhost:8000/admin) for the admin panel
 
-#### Final Setup Steps (for both options):
-1. In the admin panel, create user profiles
-2. Start the Anyland game client
-3. Refresh the admin page to see pending connections
-4. Assign profiles to connected clients
-5. Optional: You can also pre-assign a profile for the next connecting client in advance using the "Set Next Profile" feature
-6. You're playing—enjoy!
+### 5. Web Server Setup (Optional)
 
-**Tip:** The first launch takes time while indexing areas and things. Subsequent launches will be much faster. Create a shortcut to your preferred `.bat` file for quick access.
+For production use with custom domains, install Caddy:
+
+```bash
+# Download Linux Caddy
+wget https://github.com/caddyserver/caddy/releases/download/v2.7.6/caddy_2.7.6_linux_amd64.tar.gz
+tar -xzf caddy_2.7.6_linux_amd64.tar.gz
+sudo mv caddy /usr/local/bin/
+
+# Start Caddy with the provided config
+caddy run --config CADDY/Caddyfile
+```
+
+### 6. Final Setup Steps
+
+1. Visit [http://localhost:8000/admin](http://localhost:8000/admin) for the admin panel
+2. In the admin panel, create user profiles
+3. Configure your hosts file (see step 2 above)
+4. Start the Anyland game client
+5. Refresh the admin page to see pending connections
+6. Assign profiles to connected clients
+7. Optional: You can also pre-assign a profile for the next connecting client in advance using the "Set Next Profile" feature
+8. You're playing—enjoy!
+
+**Performance Tip:** The first launch takes time while indexing areas and things (~5-10 minutes). Subsequent launches load from cache and start in seconds. On legacy hardware, Node.js provides better memory management than Docker.
 
 ---
