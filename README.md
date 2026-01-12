@@ -156,7 +156,7 @@ caddy run --config CADDY/Caddyfile
 ### 2. Configure Hosts File
 
 #### If you have the Steam version:
-```plaintext
+```
 127.0.0.1 app.anyland.com
 127.0.0.1 d6ccx151yatz6.cloudfront.net
 127.0.0.1 d26e4xubm8adxu.cloudfront.net
