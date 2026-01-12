@@ -128,9 +128,9 @@ npm install
 
 # 6. Start the server
 npm run start:node
-```
 
-That's it! Your server will be running on `http://localhost:8000`.
+# 7. Start Caddy (in a separate terminal)
+caddy run --config CADDY/Caddyfile
 
 **Available npm scripts:**
 - `npm run start:node` - Run with Node.js (Linux optimized)
@@ -147,9 +147,9 @@ That's it! Your server will be running on `http://localhost:8000`.
 - Click **"Start-Server Docker.bat"** to start both services automatically
 
 #### Option C: Direct Installation with Bun (Advanced users)
-- **Windows/Linux/macOS**: Install [Bun](https://bun.sh/) runtime and download [Caddy](https://caddyserver.com/) web server
+- **Windows/Linux/macOS**: Install [Bun](https://bun.sh/) runtime and download [Caddy](https://caddyserver.com/)
 - **Linux**: Run `./install-and-run.sh` to install Bun and start the server
-- Click **"Start-Server.bat"** (Windows) or use the launch scripts to start both game server (Bun) and web server (Caddy)
+- Click **"Start-Server.bat"** (Windows) or use the launch scripts to start both game server (Bun) and Caddy
 
 ---
 
@@ -212,14 +212,14 @@ The server will automatically index areas and things on first run, then load fro
 5. Open `Echoland-Admin.html` or visit [http://localhost:8000/admin](http://localhost:8000/admin)
 
 #### Direct Installation with Bun (Option C):
-1. **Windows**: Double-click **"Start-Server.bat"** (starts both Bun game server and Caddy web server)
+1. **Windows**: Double-click **"Start-Server.bat"** (starts both Bun game server and Caddy)
 2. **Linux**: Run `./launch-server-linux.sh` to start the game server and `./launch-anyland-linux.sh` for the full setup
 3. Wait for indexing to complete
 4. Visit [http://localhost:8000/admin](http://localhost:8000/admin) for the admin panel
 
-### 5. Web Server Setup (Optional)
+### 5. Web Server Setup (Required)
 
-For production use with custom domains, install Caddy:
+Caddy is required for the Anyland game client to connect properly. It handles domain routing and SSL certificates:
 
 ```bash
 # Download Linux Caddy
@@ -227,21 +227,28 @@ wget https://github.com/caddyserver/caddy/releases/download/v2.7.6/caddy_2.7.6_l
 tar -xzf caddy_2.7.6_linux_amd64.tar.gz
 sudo mv caddy /usr/local/bin/
 
-# Start Caddy with the provided config
+# Start Caddy with the provided config (run in separate terminal)
 caddy run --config CADDY/Caddyfile
 ```
 
 ### 6. Final Setup Steps
 
-1. Visit [http://localhost:8000/admin](http://localhost:8000/admin) for the admin panel
-2. In the admin panel, create user profiles
-3. Configure your hosts file (see step 2 above)
-4. Start the Anyland game client
-5. Refresh the admin page to see pending connections
-6. Assign profiles to connected clients
-7. Optional: You can also pre-assign a profile for the next connecting client in advance using the "Set Next Profile" feature
-8. You're playing—enjoy!
+Both the Node.js game server and Caddy must be running for the game to work properly.
+
+1. Ensure both servers are running:
+   - Game server: `npm run start:node`
+   - Web server: `caddy run --config CADDY/Caddyfile`
+2. Configure your hosts file (see step 2 above)
+3. Visit [http://localhost:8000/admin](http://localhost:8000/admin) for the admin panel
+4. In the admin panel, create user profiles
+5. Start the Anyland game client
+6. Refresh the admin page to see pending connections
+7. Assign profiles to connected clients
+8. Optional: You can also pre-assign a profile for the next connecting client in advance using the "Set Next Profile" feature
+9. You're playing—enjoy!
 
 **Performance Tip:** The first launch takes time while indexing areas and things (~5-10 minutes). Subsequent launches load from cache and start in seconds. On legacy hardware, Node.js provides better memory management than Docker.
+
+**Important:** Keep both the game server and Caddy running simultaneously for the game to function properly.
 
 ---
