@@ -156,11 +156,15 @@ caddy run --config CADDY/Caddyfile
 ### 2. Configure Hosts File
 
 #### If you have the Steam version:
-```
+```host
 127.0.0.1 app.anyland.com
 127.0.0.1 d6ccx151yatz6.cloudfront.net
 127.0.0.1 d26e4xubm8adxu.cloudfront.net
 #127.0.0.1 steamuserimages-a.akamaihd.net
+
+Of course change it accordingly to the corresponding server ip for example if running on the same local network
+with a different computer as I did with this version of the server or doing it with a raspberry pi which is for
+me the best way to handle this and the sexiest way too.
 ```
 
 Download the client:  
