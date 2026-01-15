@@ -575,6 +575,11 @@ async function ensureHomeArea(account: Record<string, any>) {
   areaByUrlName.set(areaUrlName, areaId);
   console.log(`[HOME AREA] ✅ Added home area ${areaId} to in-memory index`);
 
+  // ✅ Save updated area index to cache file
+  await mkdirWithPermissions("./cache");
+  await writeFileWithPermissions("./cache/areaIndex.json", JSON.stringify(areaIndex));
+  console.log(`[HOME AREA] ✅ Saved area index to cache file`);
+
   console.log(`🌍 Created default home area for ${account.screenName}`);
 }
 
@@ -2327,6 +2332,11 @@ const app = new Elysia()
     });
     areaByUrlName.set(areaUrlName, areaId);
     console.log(`[AREA CREATE] ✅ Added area ${areaId} (${areaName}) to in-memory index`);
+
+    // ✅ Save updated area index to cache file
+    await mkdirWithPermissions("./cache");
+    await writeFileWithPermissions("./cache/areaIndex.json", JSON.stringify(areaIndex));
+    console.log(`[AREA CREATE] ✅ Saved area index to cache file`);
 
     return new Response(JSON.stringify({ id: areaId }), {
       status: 200,
