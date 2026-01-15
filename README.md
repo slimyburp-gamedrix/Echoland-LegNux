@@ -177,6 +177,28 @@ Place the images folder inside the main Echoland directory.
 
 ---
 
+## Linux Permission Issues
+
+**Issue you might encounter:** On Linux systems, you may run into permission errors
+that prevent the server from writing files, causing "NOT FOUND" errors when trying
+to access areas after restarting the server.
+
+**Solution:** The server now automatically creates files and directories with full permissions (666 for files, 777 for directories) to prevent permission issues on Linux. This ensures the server can always read/write its own files without permission conflicts.
+
+If you still encounter permission issues, fix permissions on the entire Echoland folder (replace `username` with your Linux username):
+
+```bash
+# Change ownership of the entire folder
+sudo chown -R username:username .
+
+# Set full permissions
+sudo chmod -R 777 .
+```
+
+This only happens on Linux systems - Windows has no such issues.
+
+---
+
 ### 3. Download Archive Data
 
 [Archive Data](https://drive.google.com/file/d/1f-XnM_KmwdqGhp9lpCx1SCiWUdCjhjWw/view?usp=drive_link)

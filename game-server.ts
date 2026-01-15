@@ -30,6 +30,35 @@ function createFileHandle(filePath: string) {
   };
 }
 
+// Helper function to write files with full permissions for everyone
+async function writeFileWithPermissions(filePath: string, data: string): Promise<void> {
+  // Write the file first
+  await fs.writeFile(filePath, data);
+
+  // Set full permissions so anyone can read/write the file
+  // This ensures the server can always modify its own files on Linux
+  try {
+    await fs.chmod(filePath, 0o666); // rw-rw-rw-
+  } catch (error) {
+    // chmod might not be available on all systems, ignore errors
+    console.warn(`Could not set permissions on ${filePath}:`, error.message);
+  }
+}
+
+// Helper function to create directories with full permissions for everyone
+async function mkdirWithPermissions(dirPath: string): Promise<void> {
+  await fs.mkdir(dirPath, { recursive: true });
+
+  // Set full permissions so anyone can read/write/execute in the directory
+  // This ensures the server can always access its own directories on Linux
+  try {
+    await fs.chmod(dirPath, 0o777); // rwxrwxrwx
+  } catch (error) {
+    // chmod might not be available on all systems, ignore errors
+    console.warn(`Could not set permissions on directory ${dirPath}:`, error.message);
+  }
+}
+
 
 // Simple mutex for preventing concurrent account.json modifications
 class AsyncMutex {
@@ -81,8 +110,8 @@ async function syncProfileToLegacy(profileName: string): Promise<void> {
   const profilePath = getAccountPathForProfile(profileName);
   try {
     const data = await fs.readFile(profilePath, "utf-8");
-    await fs.mkdir(path.dirname(LEGACY_ACCOUNT_PATH), { recursive: true });
-    await fs.writeFile(LEGACY_ACCOUNT_PATH, data);
+    await mkdirWithPermissions(path.dirname(LEGACY_ACCOUNT_PATH));
+    await writeFileWithPermissions(LEGACY_ACCOUNT_PATH, data);
   } catch (e) {
     console.warn(`[PROFILE] Could not sync ${profileName} to legacy:`, e);
   }
@@ -92,8 +121,8 @@ async function syncLegacyToProfile(profileName: string): Promise<void> {
   const profilePath = getAccountPathForProfile(profileName);
   try {
     const data = await fs.readFile(LEGACY_ACCOUNT_PATH, "utf-8");
-    await fs.mkdir(ACCOUNTS_DIR, { recursive: true });
-    await fs.writeFile(profilePath, data);
+    await mkdirWithPermissions(ACCOUNTS_DIR);
+    await writeFileWithPermissions(profilePath, data);
     console.log(`[PROFILE] Saved data for ${profileName}`);
   } catch (e) {
     console.warn(`[PROFILE] Could not sync legacy to ${profileName}:`, e);
@@ -185,7 +214,7 @@ async function injectInitialAreaToList(areaId: string, areaName: string) {
   areaList.totalPublicAreas = (areaList.totalPublicAreas ?? 0) + 1;
   areaList.totalSearchablePublicAreas = (areaList.totalSearchablePublicAreas ?? 0) + 1;
 
-  await fs.writeFile(listPath, JSON.stringify(areaList, null, 2));
+  await writeFileWithPermissions(listPath, JSON.stringify(areaList, null, 2));
 }
 
 // removed duplicate default imports; using namespace imports declared above
@@ -209,8 +238,8 @@ async function initDefaults() {
       attachments: {}
     };
 
-    await fs.mkdir("./data/person", { recursive: true });
-    await fs.writeFile(accountPath, JSON.stringify(accountData, null, 2));
+    await mkdirWithPermissions("./data/person");
+    await writeFileWithPermissions(accountPath, JSON.stringify(accountData, null, 2));
     console.log(`🧠 Memory card initialized for ${screenName}`);
   }
 
@@ -223,7 +252,7 @@ async function initDefaults() {
   
   // Save updated account data if needed
   if (needsUpdate) {
-    await fs.writeFile(accountPath, JSON.stringify(accountData, null, 2));
+    await writeFileWithPermissions(accountPath, JSON.stringify(accountData, null, 2));
     console.log(`🔄 Updated account data with missing fields`);
   }
 
@@ -248,8 +277,8 @@ async function initDefaults() {
       isOnline: true
     };
 
-    await fs.mkdir("./data/person/info", { recursive: true });
-    await fs.writeFile(infoPath, JSON.stringify(personInfo, null, 2));
+    await mkdirWithPermissions("./data/person/info");
+    await writeFileWithPermissions(infoPath, JSON.stringify(personInfo, null, 2));
     console.log(`📇 Created person info file for ${accountData.screenName}`);
   }
   // Check if home area already exists
@@ -268,11 +297,11 @@ async function initDefaults() {
   const areaName = `${accountData.screenName}'s home`;
   const areaKey = `rr${randomUUID().replace(/-/g, "").slice(0, 24)}`;
   const initDefaultsBundleFolder = `./data/area/bundle/${areaId}`;
-  await fs.mkdir(initDefaultsBundleFolder, { recursive: true });
+  await mkdirWithPermissions(initDefaultsBundleFolder);
   const initDefaultsBundlePath = `${initDefaultsBundleFolder}/${areaKey}.json`;
-  await fs.writeFile(initDefaultsBundlePath, JSON.stringify({ thingDefinitions: [], serveTime: 0 }, null, 2));
+  await writeFileWithPermissions(initDefaultsBundlePath, JSON.stringify({ thingDefinitions: [], serveTime: 0 }, null, 2));
   const subareaPath = `./data/area/subareas/${areaId}.json`;
-  await fs.writeFile(subareaPath, JSON.stringify({ subareas: [] }, null, 2));
+  await writeFileWithPermissions(subareaPath, JSON.stringify({ subareas: [] }, null, 2));
 
   const areaInfo = {
     editors: [
@@ -328,25 +357,25 @@ async function initDefaults() {
     serveTime: 3
   };
 
-  await fs.mkdir(`./data/area/info`, { recursive: true });
-  await fs.mkdir(`./data/area/load`, { recursive: true });
-  await fs.mkdir(`./data/area/bundle`, { recursive: true });
+  await mkdirWithPermissions(`./data/area/info`);
+  await mkdirWithPermissions(`./data/area/load`);
+  await mkdirWithPermissions(`./data/area/bundle`);
 
-  await fs.writeFile(`./data/area/info/${areaId}.json`, JSON.stringify(areaInfo, null, 2));
-  await fs.writeFile(`./data/area/load/${areaId}.json`, JSON.stringify(areaLoad, null, 2));
+  await writeFileWithPermissions(`./data/area/info/${areaId}.json`, JSON.stringify(areaInfo, null, 2));
+  await writeFileWithPermissions(`./data/area/load/${areaId}.json`, JSON.stringify(areaLoad, null, 2));
 
   // Create bundle in subfolder with proper structure: bundle/{areaId}/{bundleKey}.json
   const ensureHomeAreaBundleFolder = `./data/area/bundle/${areaId}`;
-  await fs.mkdir(ensureHomeAreaBundleFolder, { recursive: true });
+  await mkdirWithPermissions(ensureHomeAreaBundleFolder);
   const ensureHomeAreaBundlePath = `${ensureHomeAreaBundleFolder}/${areaKey}.json`;
-  await fs.writeFile(ensureHomeAreaBundlePath, JSON.stringify(areaBundle, null, 2));
+  await writeFileWithPermissions(ensureHomeAreaBundlePath, JSON.stringify(areaBundle, null, 2));
 
   console.log(`🌍 Created default home area for ${accountData.screenName}`);
 }
 
 async function listProfiles(): Promise<string[]> {
   try {
-    await fs.mkdir(ACCOUNTS_DIR, { recursive: true });
+    await mkdirWithPermissions(ACCOUNTS_DIR);
     const files = await fs.readdir(ACCOUNTS_DIR);
     return files.filter((name) => name.endsWith(".json")).map((name) => name.replace(".json", ""));
   } catch {
@@ -365,7 +394,7 @@ async function loadAccountData(profileName: string): Promise<Record<string, any>
 
 async function saveAccountData(profileName: string, data: Record<string, any>): Promise<void> {
   await fs.mkdir(ACCOUNTS_DIR, { recursive: true });
-  await fs.writeFile(getAccountPathForProfile(profileName), JSON.stringify(data, null, 2));
+    await writeFileWithPermissions(getAccountPathForProfile(profileName), JSON.stringify(data, null, 2));
 }
 
 async function createProfileAccount(profileName: string): Promise<Record<string, any>> {
@@ -404,8 +433,8 @@ async function ensurePersonInfo(account: Record<string, any>) {
       isAreaLocked: false,
       isOnline: true
     };
-    await fs.mkdir("./data/person/info", { recursive: true });
-    await fs.writeFile(infoPath, JSON.stringify(personInfo, null, 2));
+    await mkdirWithPermissions("./data/person/info");
+    await writeFileWithPermissions(infoPath, JSON.stringify(personInfo, null, 2));
     console.log(`📇 [PROFILE] Created person info for ${account.screenName}`);
   }
 }
@@ -430,11 +459,11 @@ async function ensureHomeArea(account: Record<string, any>) {
   const areaKey = `rr${randomUUID().replace(/-/g, "").slice(0, 24)}`;
 
   const setupClientProfileBundleFolder = `./data/area/bundle/${areaId}`;
-  await fs.mkdir(setupClientProfileBundleFolder, { recursive: true });
+  await mkdirWithPermissions(setupClientProfileBundleFolder);
   const setupClientProfileBundlePath = `${setupClientProfileBundleFolder}/${areaKey}.json`;
-  await fs.writeFile(setupClientProfileBundlePath, JSON.stringify({ thingDefinitions: [], serveTime: 0 }, null, 2));
+  await writeFileWithPermissions(setupClientProfileBundlePath, JSON.stringify({ thingDefinitions: [], serveTime: 0 }, null, 2));
   const subareaPath = `./data/area/subareas/${areaId}.json`;
-  await fs.writeFile(subareaPath, JSON.stringify({ subareas: [] }, null, 2));
+  await writeFileWithPermissions(subareaPath, JSON.stringify({ subareas: [] }, null, 2));
 
   // Update user's areasearch file so home area appears in created areas
   try {
@@ -459,7 +488,7 @@ async function ensureHomeArea(account: Record<string, any>) {
     const exists = areasearchData.areas.some((a: any) => a.id === areaId);
     if (!exists) {
       areasearchData.areas.push(homeArea);
-      await fs.writeFile(areasearchPath, JSON.stringify(areasearchData, null, 2));
+      await writeFileWithPermissions(areasearchPath, JSON.stringify(areasearchData, null, 2));
     }
   } catch (error) {
     console.warn("Could not update user's areasearch file for home area:", error);
@@ -521,18 +550,18 @@ async function ensureHomeArea(account: Record<string, any>) {
     serveTime: 3
   };
 
-  await fs.mkdir(`./data/area/info`, { recursive: true });
-  await fs.mkdir(`./data/area/load`, { recursive: true });
-  await fs.mkdir(`./data/area/bundle`, { recursive: true });
+  await mkdirWithPermissions(`./data/area/info`);
+  await mkdirWithPermissions(`./data/area/load`);
+  await mkdirWithPermissions(`./data/area/bundle`);
 
-  await fs.writeFile(`./data/area/info/${areaId}.json`, JSON.stringify(areaInfo, null, 2));
-  await fs.writeFile(`./data/area/load/${areaId}.json`, JSON.stringify(areaLoad, null, 2));
+  await writeFileWithPermissions(`./data/area/info/${areaId}.json`, JSON.stringify(areaInfo, null, 2));
+  await writeFileWithPermissions(`./data/area/load/${areaId}.json`, JSON.stringify(areaLoad, null, 2));
 
   // Create bundle in subfolder with proper structure: bundle/{areaId}/{bundleKey}.json
   const createAreaBundleFolder = `./data/area/bundle/${areaId}`;
-  await fs.mkdir(createAreaBundleFolder, { recursive: true });
+  await mkdirWithPermissions(createAreaBundleFolder);
   const createAreaBundlePath = `${createAreaBundleFolder}/${areaKey}.json`;
-  await fs.writeFile(createAreaBundlePath, JSON.stringify(areaBundle, null, 2));
+  await writeFileWithPermissions(createAreaBundlePath, JSON.stringify(areaBundle, null, 2));
 
   await injectInitialAreaToList(areaId, areaName);
 
@@ -691,8 +720,8 @@ if (areaIndex.length === 0) {
   }
 
   console.log("done");
-  await fs.mkdir("./cache", { recursive: true });
-  await fs.writeFile("./cache/areaIndex.json", JSON.stringify(areaIndex));
+  await mkdirWithPermissions("./cache");
+  await writeFileWithPermissions("./cache/areaIndex.json", JSON.stringify(areaIndex));
 }
 
 const searchArea = (term: string) => {
@@ -867,9 +896,9 @@ if (thingIndex.length === 0) {
 
     // Save to cache (simple format like area index)
     try {
-      await fs.mkdir("./cache", { recursive: true });
+      await mkdirWithPermissions("./cache");
       const jsonData = JSON.stringify(thingIndex); // Compact format, no pretty printing
-      await fs.writeFile(THING_INDEX_CACHE, jsonData);
+      await writeFileWithPermissions(THING_INDEX_CACHE, jsonData);
       console.log("✓ Thing index saved to cache");
 
       // Verify the save worked (like area index does)
@@ -1407,7 +1436,7 @@ const app = new Elysia()
       // Atomic write
       try {
         const tempPath = `${accountPath}.tmp`;
-        await fs.writeFile(tempPath, JSON.stringify(accountData, null, 2));
+        await writeFileWithPermissions(tempPath, JSON.stringify(accountData, null, 2));
         await fs.rename(tempPath, accountPath);
         
         // Also persist to profile file if there's an active profile
@@ -1458,7 +1487,7 @@ const app = new Elysia()
       console.warn("[HAND COLOR] Missing r, g, b values:", body);
     }
 
-    await fs.writeFile(accountPath, JSON.stringify(accountData, null, 2));
+    await writeFileWithPermissions(accountPath, JSON.stringify(accountData, null, 2));
     
     // Also persist to profile file if there's an active profile
     if (currentActiveProfile) {
@@ -1519,7 +1548,7 @@ const app = new Elysia()
                     accountData.visitedAreas = accountData.visitedAreas.slice(-200);
                   }
 
-                  await fs.writeFile(profileAccountPath, JSON.stringify(accountData, null, 2));
+                  await writeFileWithPermissions(profileAccountPath, JSON.stringify(accountData, null, 2));
                   console.log(`[VISITED] ✅ Added area ${areaId} (${areaName}) to ${currentActiveProfile}'s visited list. Total: ${accountData.visitedAreas.length}`);
                 } else {
                   console.log(`[VISITED] Area ${areaId} already in ${currentActiveProfile}'s visited list`);
@@ -1533,7 +1562,7 @@ const app = new Elysia()
 
               if (!alreadyVisitedGlobal) {
                 areaList.visited = [...(areaList.visited ?? []), { id: areaId, name: areaName, playerCount: 0 }];
-                await fs.writeFile(listPath, JSON.stringify(areaList, null, 2));
+                await writeFileWithPermissions(listPath, JSON.stringify(areaList, null, 2));
                 console.log(`[VISITED] Added area ${areaId} (${areaName}) to global visited list.`);
               }
             } catch (error) {
@@ -1650,7 +1679,7 @@ const app = new Elysia()
                     accountData.visitedAreas = accountData.visitedAreas.slice(-200);
                   }
 
-                  await fs.writeFile(profileAccountPath, JSON.stringify(accountData, null, 2));
+                  await writeFileWithPermissions(profileAccountPath, JSON.stringify(accountData, null, 2));
                   console.log(`[VISITED] ✅ Added area ${foundAreaId} (${areaName}) to ${currentActiveProfile}'s visited list. Total: ${accountData.visitedAreas.length}`);
                 } else {
                   console.log(`[VISITED] Area ${foundAreaId} already in ${currentActiveProfile}'s visited list`);
@@ -1664,7 +1693,7 @@ const app = new Elysia()
 
               if (!alreadyVisitedGlobal) {
                 areaList.visited = [...(areaList.visited ?? []), { id: foundAreaId, name: areaName, playerCount: 0 }];
-                await fs.writeFile(listPath, JSON.stringify(areaList, null, 2));
+                await writeFileWithPermissions(listPath, JSON.stringify(areaList, null, 2));
                 console.log(`[VISITED] Added area ${foundAreaId} (${areaName}) to global visited list.`);
               }
             } catch (error) {
@@ -1797,7 +1826,7 @@ const app = new Elysia()
       const areaId = body.id || generateObjectId();
       const filePath = `./data/area/load/${areaId}.json`;
 
-      await fs.mkdir("./data/area/load", { recursive: true });
+      await mkdirWithPermissions("./data/area/load");
       // Align creator identity with account.json (same as /area route)
       let creatorId = body.creatorId;
       try {
@@ -1810,7 +1839,7 @@ const app = new Elysia()
         creatorId
       };
 
-      await fs.writeFile(filePath, JSON.stringify(sanitizedBody));
+      await writeFileWithPermissions(filePath, JSON.stringify(sanitizedBody));
 
       // Update user's areasearch file so their created areas appear in search
       try {
@@ -1837,7 +1866,7 @@ const app = new Elysia()
           const exists = areasearchData.areas.some((a: any) => a.id === areaId);
           if (!exists) {
             areasearchData.areas.push(newArea);
-            await fs.writeFile(areasearchPath, JSON.stringify(areasearchData, null, 2));
+            await writeFileWithPermissions(areasearchPath, JSON.stringify(areasearchData, null, 2));
             console.log(`[AREASEARCH] Added area ${areaId} (${body.name}) to user's created areas list`);
           }
         }
@@ -1852,7 +1881,8 @@ const app = new Elysia()
         playerCount: 0
       });
       areaByUrlName.set(body.name.replace(/[^-_a-z0-9]/gi, "").toLowerCase(), areaId);
-      await fs.writeFile("./cache/areaIndex.json", JSON.stringify(areaIndex));
+      await mkdirWithPermissions("./cache");
+      await writeFileWithPermissions("./cache/areaIndex.json", JSON.stringify(areaIndex));
 
       return { ok: true, id: areaId };
     },
@@ -1988,7 +2018,7 @@ const app = new Elysia()
     }
 
     accountData.screenName = newName;
-    await fs.writeFile(accountPath, JSON.stringify(accountData, null, 2));
+    await writeFileWithPermissions(accountPath, JSON.stringify(accountData, null, 2));
 
     return new Response(JSON.stringify({ ok: true, screenName: newName }), {
       status: 200,
@@ -2088,14 +2118,14 @@ const app = new Elysia()
         const newKey = `rr${randomUUID().replace(/-/g, "").slice(0, 24)}`;
         const newBundlePath = `${bundlePath}/${newKey}.json`;
 
-        await fs.mkdir(bundlePath, { recursive: true });
-        await fs.writeFile(newBundlePath, JSON.stringify({
+        await mkdirWithPermissions(bundlePath);
+        await writeFileWithPermissions(newBundlePath, JSON.stringify({
           thingDefinitions: [],
           serveTime: 0
         }, null, 2));
 
         loadData.areaKey = newKey;
-        await fs.writeFile(loadPath, JSON.stringify(loadData, null, 2));
+        await writeFileWithPermissions(loadPath, JSON.stringify(loadData, null, 2));
 
         return new Response(`✅ Repaired home area with new key: ${newKey}`, { status: 200 });
       }
@@ -2151,7 +2181,7 @@ const app = new Elysia()
     const areaUrlName = areaName.replace(/[^-_a-z0-9]/gi, "").toLowerCase();
 
     // ✅ Write info file
-    await fs.writeFile(`${basePath}/info/${areaId}.json`, JSON.stringify({
+    await writeFileWithPermissions(`${basePath}/info/${areaId}.json`, JSON.stringify({
       editors: [{ id: personId, name: personName, isOwner: true }],
       listEditors: [],
       copiedFromAreas: [],
@@ -2169,13 +2199,13 @@ const app = new Elysia()
     }, null, 2));
 
     // ✅ Write bundle file
-    await fs.writeFile(`${basePath}/bundle/${areaId}/${bundleKey}.json`, JSON.stringify({
+    await writeFileWithPermissions(`${basePath}/bundle/${areaId}/${bundleKey}.json`, JSON.stringify({
       thingDefinitions: [],
       serveTime: 0
     }, null, 2));
 
     // ✅ Write load file with embedded settings
-    await fs.writeFile(`${basePath}/load/${areaId}.json`, JSON.stringify({
+    await writeFileWithPermissions(`${basePath}/load/${areaId}.json`, JSON.stringify({
       ok: true,
       areaId,
       areaName,
@@ -2215,7 +2245,7 @@ const app = new Elysia()
     }, null, 2));
 
     // ✅ Write subareas file
-    await fs.writeFile(`${basePath}/subareas/${areaId}.json`, JSON.stringify({ subAreas: [] }, null, 2));
+    await writeFileWithPermissions(`${basePath}/subareas/${areaId}.json`, JSON.stringify({ subAreas: [] }, null, 2));
 
     // ✅ Update areaIndex.json
     const indexPath = "./cache/areaIndex.json";
@@ -2268,7 +2298,7 @@ const app = new Elysia()
     areaList.totalPublicAreas = (areaList.totalPublicAreas ?? 0) + 1;
     areaList.totalSearchablePublicAreas = (areaList.totalSearchablePublicAreas ?? 0) + 1;
 
-    await fs.writeFile(listPath, JSON.stringify(areaList, null, 2));
+    await writeFileWithPermissions(listPath, JSON.stringify(areaList, null, 2));
 
     // ✅ Inject area into account.json under ownedAreas
     const accountPath = await getAccountPath();
@@ -2278,7 +2308,7 @@ const app = new Elysia()
 
       accountData.ownedAreas = [...new Set([...(accountData.ownedAreas ?? []), areaId])];
 
-      await fs.writeFile(accountPath, JSON.stringify(accountData, null, 2));
+      await writeFileWithPermissions(accountPath, JSON.stringify(accountData, null, 2));
       
       // Persist to profile file
       if (currentActiveProfile) {
@@ -2493,7 +2523,7 @@ const app = new Elysia()
           console.log(`[VISITED] Trimmed visited list to 200 most recent entries`);
         }
 
-        await fs.writeFile(profileAccountPath, JSON.stringify(accountData, null, 2));
+        await writeFileWithPermissions(profileAccountPath, JSON.stringify(accountData, null, 2));
         console.log(`[VISITED] ✅ Successfully updated ${accountData.screenName}'s visited list in profile ${currentActiveProfile}. Total areas visited: ${accountData.visitedAreas.length}`);
       } else {
         console.log(`[VISITED] Area ${areaId} already in ${accountData.screenName}'s visited list`);
@@ -2506,7 +2536,7 @@ const app = new Elysia()
 
       if (!alreadyVisitedGlobal) {
         areaList.visited = [...(areaList.visited ?? []), { id: areaId, name, playerCount: 0 }];
-        await fs.writeFile(listPath, JSON.stringify(areaList, null, 2));
+        await writeFileWithPermissions(listPath, JSON.stringify(areaList, null, 2));
       }
     } catch (error) {
       console.error("Error tracking area visit:", error);
@@ -2517,7 +2547,7 @@ const app = new Elysia()
 
       if (!alreadyVisited) {
         areaList.visited.push({ id: areaId, name, playerCount: 0 });
-        await fs.writeFile(listPath, JSON.stringify(areaList, null, 2));
+        await writeFileWithPermissions(listPath, JSON.stringify(areaList, null, 2));
       }
     }
 
@@ -2554,7 +2584,7 @@ const app = new Elysia()
 
     parsed.placedDaysAgo = 0;
 
-    await fs.mkdir(`./data/placement/info/${areaId}`, { recursive: true });
+    await mkdirWithPermissions(`./data/placement/info/${areaId}`);
     await fs.writeFile(placementPath, JSON.stringify(parsed, null, 2));
 
     const areaFilePath = `./data/area/load/${areaId}.json`;
@@ -2630,10 +2660,10 @@ const app = new Elysia()
     }
 
     const dirPath = path.resolve("./data/placement/info/", areaId);
-    await fs.mkdir(dirPath, { recursive: true });
+    await mkdirWithPermissions(dirPath);
 
     const filePath = path.join(dirPath, placementId + ".json");
-    await fs.writeFile(filePath, JSON.stringify(data));
+    await writeFileWithPermissions(filePath, JSON.stringify(data));
 
     return { ok: true };
   }, {
@@ -2694,7 +2724,7 @@ const app = new Elysia()
       parsed.placerName = "anonymous";
     }
 
-    await fs.mkdir(`./data/placement/info/${areaId}`, { recursive: true });
+    await mkdirWithPermissions(`./data/placement/info/${areaId}`);
     await fs.writeFile(placementPath, JSON.stringify(parsed, null, 2));
 
     const areaFilePath = `./data/area/load/${areaId}.json`;
@@ -2760,7 +2790,7 @@ const app = new Elysia()
 
     for (const placement of newPlacements) {
       const placementPath = `./data/placement/info/${areaId}/${placement.Id}.json`;
-      await fs.mkdir(`./data/placement/info/${areaId}`, { recursive: true });
+      await mkdirWithPermissions(`./data/placement/info/${areaId}`);
       await fs.writeFile(placementPath, JSON.stringify(placement, null, 2));
     }
 
@@ -2846,7 +2876,7 @@ const app = new Elysia()
       try {
         // Ensure the directory exists
         const placementDir = `./data/placement/info/${areaId}`;
-        await fs.mkdir(placementDir, { recursive: true });
+        await mkdirWithPermissions(placementDir);
         await fs.writeFile(placementPath, JSON.stringify(placementData, null, 2));
         console.log("[SETATTR] Updated placement file");
       } catch (e) {
@@ -2932,7 +2962,7 @@ const app = new Elysia()
     if (statusText !== undefined) personData.statusText = statusText;
     if (isFindable !== undefined) personData.isFindable = isFindable;
 
-    await fs.writeFile(infoPath, JSON.stringify(personData, null, 2));
+    await writeFileWithPermissions(infoPath, JSON.stringify(personData, null, 2));
 
     return new Response(JSON.stringify({ ok: true }), {
       status: 200,
@@ -3034,13 +3064,13 @@ const app = new Elysia()
     }
 
     accountData.inventory = current;
-    await fs.writeFile(accountPath, JSON.stringify(accountData, null, 2));
+    await writeFileWithPermissions(accountPath, JSON.stringify(accountData, null, 2));
 
     // Also mirror to per-user inventory file for compatibility
     const invDir = `./data/person/inventory`;
     const personId = accountData.personId || "unknown";
     const invPath = `${invDir}/${personId}.json`;
-    await fs.mkdir(invDir, { recursive: true });
+    await mkdirWithPermissions(invDir);
     await fs.writeFile(invPath, JSON.stringify(current, null, 2));
     
     // Persist to profile file if there's an active profile
@@ -3106,7 +3136,7 @@ const app = new Elysia()
     }
 
     accountData.inventory = current;
-    await fs.writeFile(accountPath, JSON.stringify(accountData, null, 2));
+    await writeFileWithPermissions(accountPath, JSON.stringify(accountData, null, 2));
     
     // Persist to profile file if there's an active profile
     if (currentActiveProfile) {
@@ -3170,7 +3200,7 @@ const app = new Elysia()
     }
 
     accountData.inventory = current;
-    await fs.writeFile(accountPath, JSON.stringify(accountData, null, 2));
+    await writeFileWithPermissions(accountPath, JSON.stringify(accountData, null, 2));
     
     // Persist to profile file if there's an active profile
     if (currentActiveProfile) {
@@ -3264,12 +3294,12 @@ const app = new Elysia()
     }
 
     accountData.inventory = current;
-    await fs.writeFile(accountPath, JSON.stringify(accountData, null, 2));
+    await writeFileWithPermissions(accountPath, JSON.stringify(accountData, null, 2));
 
     const personId = accountData.personId || "unknown";
     const invDir = `./data/person/inventory`;
     const invPath = `${invDir}/${personId}.json`;
-    await fs.mkdir(invDir, { recursive: true });
+    await mkdirWithPermissions(invDir);
     await fs.writeFile(invPath, JSON.stringify(current, null, 2));
     
     // Persist to profile file if there's an active profile
@@ -3341,9 +3371,9 @@ const app = new Elysia()
     };
 
     // Create directories and save all three files
-    await fs.mkdir(path.dirname(infoPath), { recursive: true });
-    await fs.mkdir(path.dirname(defPath), { recursive: true });
-    await fs.mkdir(path.dirname(tagsPath), { recursive: true });
+    await mkdirWithPermissions(path.dirname(infoPath));
+    await mkdirWithPermissions(path.dirname(defPath));
+    await mkdirWithPermissions(path.dirname(tagsPath));
     
     await fs.writeFile(infoPath, JSON.stringify(thingInfo, null, 2));
     await fs.writeFile(defPath, JSON.stringify(thingDef, null, 2));
@@ -3354,7 +3384,7 @@ const app = new Elysia()
     // Update topby list for the creator
     try {
       const topbyDir = "./data/person/topby";
-      await fs.mkdir(topbyDir, { recursive: true });
+      await mkdirWithPermissions(topbyDir);
       const topbyPath = `${topbyDir}/${creatorId}.json`;
       
       let topbyData: { ids: string[] } = { ids: [] };
@@ -3844,7 +3874,7 @@ const app = new Elysia()
       }
     }
 
-    await fs.writeFile(filePath, JSON.stringify(thingData, null, 2));
+    await writeFileWithPermissions(filePath, JSON.stringify(thingData, null, 2));
 
     // ✅ Update thing search index
     const thingEntry = thingIndex.find(t => t.id === thingId);
@@ -4082,7 +4112,7 @@ async function rebuildAreaIndex() {
       }
     }
 
-    await fs.writeFile(cachePath, JSON.stringify(index, null, 2));
+    await writeFileWithPermissions(cachePath, JSON.stringify(index, null, 2));
     console.log(`[Area Index] Rebuilt index with ${Object.keys(index).length} areas`);
   } catch (err) {
     console.error("[Area Index] Failed to rebuild index:", err);
