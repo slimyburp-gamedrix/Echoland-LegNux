@@ -393,8 +393,8 @@ async function loadAccountData(profileName: string): Promise<Record<string, any>
 }
 
 async function saveAccountData(profileName: string, data: Record<string, any>): Promise<void> {
-  await fs.mkdir(ACCOUNTS_DIR, { recursive: true });
-    await writeFileWithPermissions(getAccountPathForProfile(profileName), JSON.stringify(data, null, 2));
+  await mkdirWithPermissions(ACCOUNTS_DIR);
+  await writeFileWithPermissions(getAccountPathForProfile(profileName), JSON.stringify(data, null, 2));
 }
 
 async function createProfileAccount(profileName: string): Promise<Record<string, any>> {
@@ -595,7 +595,7 @@ async function setupClientProfile(profileName: string): Promise<Record<string, a
 }
 
 async function ensureProfileAccount(profileName: string): Promise<void> {
-  await fs.mkdir(ACCOUNTS_DIR, { recursive: true });
+  await mkdirWithPermissions(ACCOUNTS_DIR);
   try {
     await fs.access(getAccountPathForProfile(profileName));
   } catch {
@@ -2170,10 +2170,10 @@ const app = new Elysia()
     const timestamp = new Date().toISOString();
 
     await Promise.all([
-      fs.mkdir(`${basePath}/info`, { recursive: true }),
-      fs.mkdir(`${basePath}/bundle/${areaId}`, { recursive: true }),
-      fs.mkdir(`${basePath}/load`, { recursive: true }),
-      fs.mkdir(`${basePath}/subareas`, { recursive: true })
+      mkdirWithPermissions(`${basePath}/info`),
+      mkdirWithPermissions(`${basePath}/bundle/${areaId}`),
+      mkdirWithPermissions(`${basePath}/load`),
+      mkdirWithPermissions(`${basePath}/subareas`)
     ]);
 
     const groundPlacement = {
@@ -2272,7 +2272,7 @@ const app = new Elysia()
       createdAt: timestamp
     });
 
-    await fs.writeFile(indexPath, JSON.stringify(currentIndex, null, 2));
+    await writeFileWithPermissions(indexPath, JSON.stringify(currentIndex, null, 2));
 
     // ✅ Update arealist.json (prevent duplicates)
     const listPath = `${basePath}/arealist.json`;
@@ -2445,7 +2445,7 @@ const app = new Elysia()
 			
 			// Write updated data back to load file
 			if (updated) {
-				await fs.writeFile(loadPath, JSON.stringify(areaData, null, 2));
+				await writeFileWithPermissions(loadPath, JSON.stringify(areaData, null, 2));
 				
 				// Also update info file if it exists
 				try {
@@ -2458,7 +2458,7 @@ const app = new Elysia()
 						if (isCopyable !== undefined) infoData.isCopyable = areaData.isCopyable;
 						if (isExcluded !== undefined) infoData.isExcluded = areaData.isExcluded;
 						
-						await fs.writeFile(infoPath, JSON.stringify(infoData, null, 2));
+						await writeFileWithPermissions(infoPath, JSON.stringify(infoData, null, 2));
 					}
 				} catch (infoError) {
 					console.warn(`[AREA SETTINGS] Could not update info file for ${areaId}:`, infoError);
@@ -2595,7 +2595,7 @@ const app = new Elysia()
     parsed.placedDaysAgo = 0;
 
     await mkdirWithPermissions(`./data/placement/info/${areaId}`);
-    await fs.writeFile(placementPath, JSON.stringify(parsed, null, 2));
+    await writeFileWithPermissions(placementPath, JSON.stringify(parsed, null, 2));
 
     const areaFilePath = `./data/area/load/${areaId}.json`;
     let areaData: Record<string, any> = {};
@@ -2610,7 +2610,7 @@ const app = new Elysia()
     areaData.placements = areaData.placements.filter(p => p.Id !== placementId);
     areaData.placements.push(parsed);
 
-    await fs.writeFile(areaFilePath, JSON.stringify(areaData, null, 2));
+    await writeFileWithPermissions(areaFilePath, JSON.stringify(areaData, null, 2));
 
     return new Response(JSON.stringify({ ok: true }), {
       status: 200,
@@ -2707,7 +2707,7 @@ const app = new Elysia()
       (p: any) => p.Id !== placementId
     );
 
-    await fs.writeFile(areaFilePath, JSON.stringify(areaData, null, 2));
+    await writeFileWithPermissions(areaFilePath, JSON.stringify(areaData, null, 2));
 
     return new Response(JSON.stringify({ ok: true }), {
       status: 200,
@@ -2735,7 +2735,7 @@ const app = new Elysia()
     }
 
     await mkdirWithPermissions(`./data/placement/info/${areaId}`);
-    await fs.writeFile(placementPath, JSON.stringify(parsed, null, 2));
+    await writeFileWithPermissions(placementPath, JSON.stringify(parsed, null, 2));
 
     const areaFilePath = `./data/area/load/${areaId}.json`;
     let areaData: Record<string, any> = {};
@@ -2749,7 +2749,7 @@ const app = new Elysia()
     areaData.placements = areaData.placements.filter(p => p.Id !== placementId);
     areaData.placements.push(parsed);
 
-    await fs.writeFile(areaFilePath, JSON.stringify(areaData, null, 2));
+    await writeFileWithPermissions(areaFilePath, JSON.stringify(areaData, null, 2));
 
     return new Response(JSON.stringify({ ok: true }), {
       status: 200,
@@ -2801,7 +2801,7 @@ const app = new Elysia()
     for (const placement of newPlacements) {
       const placementPath = `./data/placement/info/${areaId}/${placement.Id}.json`;
       await mkdirWithPermissions(`./data/placement/info/${areaId}`);
-      await fs.writeFile(placementPath, JSON.stringify(placement, null, 2));
+      await writeFileWithPermissions(placementPath, JSON.stringify(placement, null, 2));
     }
 
     const existingIds = new Set(areaData.placements.map((p: any) => p.Id));
@@ -2811,7 +2811,7 @@ const app = new Elysia()
       }
     }
 
-    await fs.writeFile(areaFilePath, JSON.stringify(areaData, null, 2));
+    await writeFileWithPermissions(areaFilePath, JSON.stringify(areaData, null, 2));
 
     return new Response(JSON.stringify({ ok: true, count: newPlacements.length }), {
       status: 200,
@@ -2887,7 +2887,7 @@ const app = new Elysia()
         // Ensure the directory exists
         const placementDir = `./data/placement/info/${areaId}`;
         await mkdirWithPermissions(placementDir);
-        await fs.writeFile(placementPath, JSON.stringify(placementData, null, 2));
+        await writeFileWithPermissions(placementPath, JSON.stringify(placementData, null, 2));
         console.log("[SETATTR] Updated placement file");
       } catch (e) {
         console.log("[SETATTR] Could not write placement file (may be read-only):", e);
@@ -2901,7 +2901,7 @@ const app = new Elysia()
           const placementIndex = areaData.placements.findIndex((p: any) => p.Id === placementId);
           if (placementIndex !== -1) {
             areaData.placements[placementIndex].A = placementData.A;
-            await fs.writeFile(areaFilePath, JSON.stringify(areaData, null, 2));
+            await writeFileWithPermissions(areaFilePath, JSON.stringify(areaData, null, 2));
             console.log("[SETATTR] Updated area load file");
           }
         }
@@ -3081,7 +3081,7 @@ const app = new Elysia()
     const personId = accountData.personId || "unknown";
     const invPath = `${invDir}/${personId}.json`;
     await mkdirWithPermissions(invDir);
-    await fs.writeFile(invPath, JSON.stringify(current, null, 2));
+    await writeFileWithPermissions(invPath, JSON.stringify(current, null, 2));
     
     // Persist to profile file if there's an active profile
     if (currentActiveProfile) {
@@ -3310,7 +3310,7 @@ const app = new Elysia()
     const invDir = `./data/person/inventory`;
     const invPath = `${invDir}/${personId}.json`;
     await mkdirWithPermissions(invDir);
-    await fs.writeFile(invPath, JSON.stringify(current, null, 2));
+    await writeFileWithPermissions(invPath, JSON.stringify(current, null, 2));
     
     // Persist to profile file if there's an active profile
     if (currentActiveProfile) {
@@ -3385,9 +3385,9 @@ const app = new Elysia()
     await mkdirWithPermissions(path.dirname(defPath));
     await mkdirWithPermissions(path.dirname(tagsPath));
     
-    await fs.writeFile(infoPath, JSON.stringify(thingInfo, null, 2));
-    await fs.writeFile(defPath, JSON.stringify(thingDef, null, 2));
-    await fs.writeFile(tagsPath, JSON.stringify(thingTags, null, 2));
+    await writeFileWithPermissions(infoPath, JSON.stringify(thingInfo, null, 2));
+    await writeFileWithPermissions(defPath, JSON.stringify(thingDef, null, 2));
+    await writeFileWithPermissions(tagsPath, JSON.stringify(thingTags, null, 2));
 
     console.log(`✅ Created thing ${thingId} (name: "${thingName}") with info, def, and tags files`);
 
@@ -3407,7 +3407,7 @@ const app = new Elysia()
       
       // Add new thing to the front of the list
       topbyData.ids = [thingId, ...(topbyData.ids || []).filter((id: string) => id !== thingId)].slice(0, 20);
-      await fs.writeFile(topbyPath, JSON.stringify(topbyData, null, 2));
+      await writeFileWithPermissions(topbyPath, JSON.stringify(topbyData, null, 2));
     } catch (e) {
       console.warn("⚠️ Could not update topby list:", e);
     }
@@ -3452,7 +3452,7 @@ const app = new Elysia()
       const defData = typeof actualDefinition === "string" ? JSON.parse(actualDefinition) : actualDefinition;
       
       // Save the complete definition
-      await fs.writeFile(defPath, JSON.stringify(defData, null, 2));
+      await writeFileWithPermissions(defPath, JSON.stringify(defData, null, 2));
       
       console.log(`✅ Updated thing definition for ${actualThingId}${defData.a ? ` with attributes: ${JSON.stringify(defData.a)}` : ''}`);
 
@@ -3464,7 +3464,7 @@ const app = new Elysia()
           const oldName = infoData.name;
           if (oldName !== newName) {
             infoData.name = newName;
-            await fs.writeFile(infoPath, JSON.stringify(infoData, null, 2));
+            await writeFileWithPermissions(infoPath, JSON.stringify(infoData, null, 2));
             console.log(`✅ Synced thing name from definition: "${oldName}" → "${newName}"`);
 
             // ✅ Update thing search index with new name
@@ -3519,7 +3519,7 @@ const app = new Elysia()
     
     try {
       const defData = typeof actualDefinition === "string" ? JSON.parse(actualDefinition) : actualDefinition;
-      await fs.writeFile(defPath, JSON.stringify(defData, null, 2));
+      await writeFileWithPermissions(defPath, JSON.stringify(defData, null, 2));
       console.log(`✅ Saved thing definition for ${actualThingId}${defData.a ? ` with attributes: ${JSON.stringify(defData.a)}` : ''}`);
 
       // ✅ Sync name from definition (n) to info file
@@ -3530,7 +3530,7 @@ const app = new Elysia()
           const oldName = infoData.name;
           if (oldName !== newName) {
             infoData.name = newName;
-            await fs.writeFile(infoPath, JSON.stringify(infoData, null, 2));
+            await writeFileWithPermissions(infoPath, JSON.stringify(infoData, null, 2));
             console.log(`✅ Synced thing name from definition: "${oldName}" → "${newName}"`);
 
             // ✅ Update thing search index with new name
@@ -3582,7 +3582,7 @@ const app = new Elysia()
     
     try {
       const defData = typeof actualDefinition === "string" ? JSON.parse(actualDefinition) : actualDefinition;
-      await fs.writeFile(defPath, JSON.stringify(defData, null, 2));
+      await writeFileWithPermissions(defPath, JSON.stringify(defData, null, 2));
       console.log(`✅ PUT thing definition for ${thingId}${defData.a ? ` with attributes: ${JSON.stringify(defData.a)}` : ''}`);
 
       return new Response(JSON.stringify({ ok: true }), {
@@ -3616,14 +3616,14 @@ const app = new Elysia()
       infoData = JSON.parse(await fs.readFile(infoPath, "utf-8"));
       const oldName = infoData.name;
       infoData.name = newName;
-      await fs.writeFile(infoPath, JSON.stringify(infoData, null, 2));
+      await writeFileWithPermissions(infoPath, JSON.stringify(infoData, null, 2));
 
       // Update thing/def
       const defPath = `./data/thing/def/${thingId}.json`;
       try {
         const defData = JSON.parse(await fs.readFile(defPath, "utf-8"));
         defData.name = newName;
-        await fs.writeFile(defPath, JSON.stringify(defData, null, 2));
+        await writeFileWithPermissions(defPath, JSON.stringify(defData, null, 2));
       } catch { }
 
       // Update thing/tags
@@ -3632,7 +3632,7 @@ const app = new Elysia()
         const tagsData = JSON.parse(await fs.readFile(tagsPath, "utf-8"));
         if (Array.isArray(tagsData.tags)) {
           tagsData.tags = tagsData.tags.map(tag => tag === oldName ? newName : tag);
-          await fs.writeFile(tagsPath, JSON.stringify(tagsData, null, 2));
+          await writeFileWithPermissions(tagsPath, JSON.stringify(tagsData, null, 2));
         }
       } catch { }
 
@@ -3648,7 +3648,7 @@ const app = new Elysia()
             const placement = JSON.parse(await fs.readFile(placementPath, "utf-8"));
             if (placement.Tid === thingId) {
               placement.name = newName;
-              await fs.writeFile(placementPath, JSON.stringify(placement, null, 2));
+              await writeFileWithPermissions(placementPath, JSON.stringify(placement, null, 2));
             }
           } catch { }
         }
@@ -3770,7 +3770,7 @@ const app = new Elysia()
           isUnlisted: false
         };
 
-        await fs.writeFile(infoPath, JSON.stringify(info, null, 2));
+        await writeFileWithPermissions(infoPath, JSON.stringify(info, null, 2));
         createdCount++;
         console.log(`🆕 Created info for ${thingId}: "${displayName}"`);
       } catch (err) {
