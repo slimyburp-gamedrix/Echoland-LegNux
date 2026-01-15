@@ -167,28 +167,6 @@ with a different computer as I did with this version of the server or doing it w
 me the best way to handle this and the sexiest way too.
 ```
 
-**Issue you might encounter:** On Linux systems, you may run into permission errors 
-that prevent the server from writing files, causing "NOT FOUND" errors when trying 
-to access areas after restarting the server.
-
-**Here's how to fix it:** Fix permissions on the entire Echoland folder (replace 
-`username` with your Linux username):
-
-```bash
-# Change ownership of the entire folder
-sudo chown -R username:username .
-
-# Set proper permissions (choose one of these options):
-# Option 1: Standard permissions (recommended for security)
-sudo chmod -R 755 .
-
-# Option 2: Full permissions (if you still have issues)
-sudo chmod -R 777 .
-```
-
-This only happens on Linux systems - Windows has no such issues.
-
----
 
 Download the client:  
 [Client Only](https://drive.google.com/file/d/10TcYQVcqVoRQDdlFOcQwUZweIsApufpm/view?usp=drive_link)
