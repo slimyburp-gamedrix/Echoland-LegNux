@@ -1,22 +1,17 @@
 
 ---
 
-# Echoland
+# Echoland — Open-Source, Self-Hostable Anyland Server
 
-**Echoland** is a server for the defunct VR creation platform Anyland.
+Echoland is an **open-source replacement server for the game Anyland** created by **Gamedrix**.
+It allows anyone to **self-host their own Anyland server** after the official servers were shut down.
 
-**Linux Native Support**: This server now runs natively on Ubuntu/Linux with Node.js, optimized for legacy hardware performance.
+Echoland is designed to be:
+- Fully self-hostable
+- Open source
+- Independent of centralized infrastructure
 
----
-
-## About
-
-Echoland is a community project built by gamedrix, based on:
-
-- The archiver work by Zetaphor and Cyel  
-- The skeleton game server originally created by Cyel
-
-Since I’m still getting familiar with Git, I’ve created a separate repo with a simple Docker-based setup so anyone can run the server locally.
+This project exists to preserve Anyland and keep it playable long-term.
 
 This is a community-driven effort. I started this with the goal of creating an open-source, writable archive. I’m not a trained developer, just someone diving in and learning as I go. The goal is to give the community a solid foundation to build their own servers, fully customizable and free to modify however you like.
 
