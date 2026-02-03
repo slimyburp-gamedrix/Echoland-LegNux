@@ -4,6 +4,12 @@ import * as fs from "node:fs/promises";
 import { AreaInfoSchema } from "./lib/schemas";
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
+import { webcrypto as crypto } from 'node:crypto';
+
+// Make crypto globally available for Elysia
+if (!globalThis.crypto) {
+  globalThis.crypto = crypto;
+}
 
 // Helper function to replace createFileHandle() functionality
 function createFileHandle(filePath: string) {
