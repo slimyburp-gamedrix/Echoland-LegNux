@@ -1,7 +1,3 @@
-// Provide crypto polyfill before importing Elysia
-import { webcrypto as crypto } from 'node:crypto';
-globalThis.crypto = crypto;
-
 import * as path from "node:path"
 import { Elysia, t } from 'elysia'
 import * as fs from "node:fs/promises";
