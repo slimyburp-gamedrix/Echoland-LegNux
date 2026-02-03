@@ -1,8 +1,6 @@
-// Setup crypto globally before importing Elysia
-import { webcrypto as crypto } from 'node:crypto';
-if (!globalThis.crypto) {
-  globalThis.crypto = crypto;
-}
+// Polyfill global crypto for Elysia compatibility
+const { webcrypto } = await import('node:crypto');
+globalThis.crypto = webcrypto;
 
 import * as path from "node:path"
 import { Elysia, t } from 'elysia'
