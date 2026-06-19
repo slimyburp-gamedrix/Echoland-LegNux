@@ -104,7 +104,7 @@ interface ClientSession {
   personId: string;
   homeAreaId: string;
   currentAreaId: string | null;
-  lastSeen: number;
+  lastActivity: number; // timestamp for session timeout tracking
 }
 
 // Map sessionToken → session (THE primary identifier - from cookie)
@@ -112,6 +112,7 @@ const sessionsByToken = new Map<string, ClientSession>();
 
 // Register a client session with a token
 function registerSession(sessionToken: string, profileName: string, personId: string, homeAreaId: string): void {
+  // Replace older sessions for the same profile (reconnect / re-auth)
   for (const [token, existing] of sessionsByToken.entries()) {
     if (existing.profileName === profileName && token !== sessionToken) {
       sessionsByToken.delete(token);
@@ -124,7 +125,7 @@ function registerSession(sessionToken: string, profileName: string, personId: st
     personId,
     homeAreaId,
     currentAreaId: homeAreaId,
-    lastSeen: Date.now()
+    lastActivity: Date.now()
   };
   sessionsByToken.set(sessionToken, session);
   console.log(`[SESSION] Registered session ${sessionToken.substring(0, 12)}... for ${profileName}`);
@@ -132,14 +133,15 @@ function registerSession(sessionToken: string, profileName: string, personId: st
 }
 
 function isSessionActive(session: ClientSession, now = Date.now()): boolean {
-  return (now - session.lastSeen) < PRESENCE_TIMEOUT_MS;
+  return (now - session.lastActivity) < SESSION_TIMEOUT_MS;
 }
 
+// Update session last activity timestamp
 function touchSession(sessionToken: string | undefined): void {
   if (!sessionToken) return;
   const session = sessionsByToken.get(sessionToken);
   if (session) {
-    session.lastSeen = Date.now();
+    session.lastActivity = Date.now();
   }
 }
 
@@ -162,7 +164,7 @@ function updateSessionArea(sessionToken: string | undefined, areaId: string): vo
   const session = sessionsByToken.get(sessionToken);
   if (session) {
     session.currentAreaId = areaId;
-    session.lastSeen = Date.now();
+    session.lastActivity = Date.now();
   }
 }
 
@@ -185,7 +187,7 @@ function getMostRecentlyActiveProfile(): string | null {
   let latest: ClientSession | null = null;
   for (const session of sessionsByToken.values()) {
     if (!isSessionActive(session, now)) continue;
-    if (!latest || session.lastSeen > latest.lastSeen) {
+    if (!latest || session.lastActivity > latest.lastActivity) {
       latest = session;
     }
   }
@@ -204,7 +206,14 @@ function getAccountPathForProfile(profileName: string): string {
 }
 
 // Get account path for the most recently active profile (uses session tracking)
-async function getAccountPath(): Promise<string> {
+async function getAccountPath(sessionToken?: string): Promise<string> {
+  if (sessionToken) {
+    const session = getSessionFromToken(sessionToken);
+    if (session) {
+      return getAccountPathForProfile(session.profileName);
+    }
+  }
+
   const effectiveProfile = getMostRecentlyActiveProfile();
   if (!effectiveProfile) {
     throw new Error("No active session");
@@ -266,6 +275,7 @@ const PORT_CDN_UGCIMAGES = Number(process.env.PORT_CDN_UGCIMAGES ?? 8003);
 // ============ PLAYER PRESENCE TRACKING ============
 // Tracks which players are in which areas with timeout
 const PRESENCE_TIMEOUT_MS = 30000; // 30 seconds without ping = player left
+const SESSION_TIMEOUT_MS = 600000; // 10 minutes without activity = session expired
 
 interface PlayerPresence {
   personId: string;
@@ -337,6 +347,7 @@ function updatePlayerPresence(personId: string, profileName: string, areaId: str
     areaId,
     lastPing: now
   });
+  notifyActiveChange();
 }
 
 // Clean up stale presence entries (run periodically)
@@ -391,18 +402,7 @@ async function getScreenNameForPerson(personId: string, fallback: string): Promi
   }
 }
 
-// Get total online players
-function getTotalOnlinePlayers(): number {
-  const now = Date.now();
-  let count = 0;
-  for (const presence of playerPresence.values()) {
-    if ((now - presence.lastPing) < PRESENCE_TIMEOUT_MS) {
-      count++;
-    }
-  }
-  return count;
-}
-
+// Clean up expired sessions (separate from presence timeout)
 function cleanupStaleSessions(): void {
   const now = Date.now();
   let removed = 0;
@@ -426,18 +426,29 @@ function getActiveSessionsByProfile(): ClientSession[] {
   for (const session of sessionsByToken.values()) {
     if (!isSessionActive(session, now)) continue;
     const existing = byProfile.get(session.profileName);
-    if (!existing || session.lastSeen > existing.lastSeen) {
+    if (!existing || session.lastActivity > existing.lastActivity) {
       byProfile.set(session.profileName, session);
     }
   }
   return Array.from(byProfile.values());
 }
 
+// Get total online players
+function getTotalOnlinePlayers(): number {
+  const now = Date.now();
+  let count = 0;
+  for (const presence of playerPresence.values()) {
+    if ((now - presence.lastPing) < PRESENCE_TIMEOUT_MS) {
+      count++;
+    }
+  }
+  return count;
+}
+
 // Run cleanup every 15 seconds
-setInterval(() => {
-  cleanupStalePresence();
-  cleanupStaleSessions();
-}, 15000);
+setInterval(cleanupStalePresence, 15000);
+// Run session cleanup every 60 seconds
+setInterval(cleanupStaleSessions, 60000);
 // ============ END PLAYER PRESENCE TRACKING ============
 
 const FRIENDS_DIR = "./data/person/friends";
@@ -461,6 +472,19 @@ async function saveFriendsData(personId: string, data: { friends: Array<{ id: st
   const tempPath = `${filePath}.tmp`;
   await writeFileWithPermissions(tempPath, JSON.stringify(data, null, 2));
   await fs.rename(tempPath, filePath);
+}
+
+async function incrementFriendStrength(personId: string, friendId: string): Promise<number> {
+  const friendsData = await loadFriendsData(personId);
+  let entry = friendsData.friends.find((f) => f.id === friendId);
+  if (entry) {
+    entry.strength = (entry.strength ?? 1) + 1;
+  } else {
+    entry = { id: friendId, strength: 1, addedAt: new Date().toISOString() };
+    friendsData.friends.push(entry);
+  }
+  await saveFriendsData(personId, friendsData);
+  return entry.strength ?? 1;
 }
 
 function isPersonOnline(personId: string): boolean {
@@ -506,19 +530,6 @@ async function isFriendOf(requesterPersonId: string, targetUserId: string): Prom
   if (!requesterPersonId || !targetUserId || requesterPersonId === targetUserId) return false;
   const { friends } = await loadFriendsData(requesterPersonId);
   return friends.some((f) => f.id === targetUserId);
-}
-
-async function incrementFriendStrength(personId: string, friendId: string): Promise<number> {
-  const friendsData = await loadFriendsData(personId);
-  let entry = friendsData.friends.find((f) => f.id === friendId);
-  if (entry) {
-    entry.strength = (entry.strength ?? 1) + 1;
-  } else {
-    entry = { id: friendId, strength: 1, addedAt: new Date().toISOString() };
-    friendsData.friends.push(entry);
-  }
-  await saveFriendsData(personId, friendsData);
-  return entry.strength ?? 1;
 }
 
 const getDynamicAreaList = async () => {
@@ -879,17 +890,6 @@ function getAreaDisplayName(areaId: string): string {
   return entry?.name || areaId;
 }
 
-async function resolveAreaNameForPing(areaId: string): Promise<string> {
-  try {
-    const data = JSON.parse(await fs.readFile(`./data/area/load/${areaId}.json`, "utf-8"));
-    if (typeof data.areaName === "string" && data.areaName) return data.areaName;
-    if (typeof data.name === "string" && data.name) return data.name;
-  } catch {
-    // fall through to index
-  }
-  return getAreaDisplayName(areaId);
-}
-
 function getAdminActiveSnapshot() {
   const now = Date.now();
   const online: Array<{
@@ -910,18 +910,15 @@ function getAdminActiveSnapshot() {
     }
   }
 
-  const onlineNames = new Set(online.map((o) => o.profileName));
-  const activeSessions = getActiveSessionsByProfile();
-  const loggedIn: Array<{
+  const sessions: Array<{
     profileName: string;
     personId: string;
     currentAreaId: string | null;
     areaName: string;
   }> = [];
 
-  for (const session of activeSessions) {
-    if (onlineNames.has(session.profileName)) continue;
-    loggedIn.push({
+  for (const session of sessionsByToken.values()) {
+    sessions.push({
       profileName: session.profileName,
       personId: session.personId,
       currentAreaId: session.currentAreaId,
@@ -931,9 +928,9 @@ function getAdminActiveSnapshot() {
 
   return {
     online,
-    loggedIn,
+    sessions,
     totalOnline: online.length,
-    activeCount: online.length + loggedIn.length
+    sessionCount: sessions.length
   };
 }
 
@@ -1070,6 +1067,17 @@ if (areaIndex.length === 0) {
   console.log("done");
   await mkdirWithPermissions("./cache");
   await writeFileWithPermissions("./cache/areaIndex.json", JSON.stringify(areaIndex));
+}
+
+const normalizeAreaName = (name: string): string => {
+  return name.replace(/[^-_a-z0-9]/gi, "").toLowerCase();
+}
+
+const isAreaNameTaken = (areaName: string, ignoreAreaId?: string): boolean => {
+  const normalized = normalizeAreaName(areaName);
+  if (!normalized) return false;
+  const existingAreaId = areaByUrlName.get(normalized);
+  return !!existingAreaId && existingAreaId !== ignoreAreaId;
 }
 
 const searchArea = (term: string) => {
@@ -1356,10 +1364,7 @@ const app = new Elysia()
       : `<div class="empty">No clients waiting. Start a client to see it here.</div>`;
 
     const onlineProfileNames = new Set(active.online.map((o) => o.profileName));
-    const sessionProfileNames = new Set([
-      ...active.online.map((o) => o.profileName),
-      ...active.loggedIn.map((s) => s.profileName)
-    ]);
+    const sessionProfileNames = new Set(active.sessions.map((s) => s.profileName));
 
     const profileRows = profiles.length
       ? profiles.map((p) => {
@@ -1444,15 +1449,15 @@ const app = new Elysia()
       <span id="active-profile" class="active-badge">${currentActiveProfile ? 'Active: ' + currentActiveProfile : 'No active profile'}</span>
     </div>
     <div class="card">
-      <h2>Live activity <span class="live-count" id="live-count">${active.totalOnline} in-world</span> · <span id="session-count">${active.activeCount} active</span></h2>
+      <h2>Live activity <span class="live-count" id="live-count">${active.totalOnline} in-world</span> · <span id="session-count">${active.sessionCount} sessions</span></h2>
       <div id="active-players-list">
         ${active.online.length
           ? active.online.map((o) => `<div class="live-row"><strong>${escapeHtml(o.profileName)}</strong> <span class="meta">in ${escapeHtml(o.areaName)}</span></div>`).join("")
           : `<div class="empty">No players in-world right now (ping timeout ${PRESENCE_TIMEOUT_MS / 1000}s)</div>`}
       </div>
       <div id="active-sessions-list" style="margin-top:12px;">
-        ${active.loggedIn.length
-          ? `<div class="meta" style="margin-bottom:6px;">Connected (not in-world):</div>` + active.loggedIn.map((s) => `<div class="live-row"><strong>${escapeHtml(s.profileName)}</strong> <span class="meta">last area: ${escapeHtml(s.areaName)}</span></div>`).join("")
+        ${active.sessions.length
+          ? `<div class="meta" style="margin-bottom:6px;">Logged-in sessions:</div>` + active.sessions.map((s) => `<div class="live-row"><strong>${escapeHtml(s.profileName)}</strong> <span class="meta">area: ${escapeHtml(s.areaName)}</span></div>`).join("")
           : ""}
       </div>
     </div>
@@ -1531,15 +1536,15 @@ const app = new Elysia()
             const list = document.getElementById('active-players-list');
             const sessionsList = document.getElementById('active-sessions-list');
             if (liveCount) liveCount.textContent = data.totalOnline + ' in-world';
-            if (sessionCount) sessionCount.textContent = data.activeCount + ' active';
+            if (sessionCount) sessionCount.textContent = data.sessionCount + ' sessions';
             if (list) {
               list.innerHTML = data.online.length
                 ? data.online.map(o => '<div class="live-row"><strong>' + o.profileName + '</strong> <span class="meta">in ' + o.areaName + '</span></div>').join('')
                 : '<div class="empty">No players in-world right now</div>';
             }
             if (sessionsList) {
-              sessionsList.innerHTML = data.loggedIn.length
-                ? '<div class="meta" style="margin-bottom:6px;">Connected (not in-world):</div>' + data.loggedIn.map(s => '<div class="live-row"><strong>' + s.profileName + '</strong> <span class="meta">last area: ' + s.areaName + '</span></div>').join('')
+              sessionsList.innerHTML = data.sessions.length
+                ? '<div class="meta" style="margin-bottom:6px;">Logged-in sessions:</div>' + data.sessions.map(s => '<div class="live-row"><strong>' + s.profileName + '</strong> <span class="meta">area: ' + s.areaName + '</span></div>').join('')
                 : '';
             }
           } catch {}
@@ -1555,15 +1560,15 @@ const app = new Elysia()
           const list = document.getElementById('active-players-list');
           const sessionsList = document.getElementById('active-sessions-list');
           if (liveCount) liveCount.textContent = data.totalOnline + ' in-world';
-          if (sessionCount) sessionCount.textContent = data.activeCount + ' active';
+          if (sessionCount) sessionCount.textContent = data.sessionCount + ' sessions';
           if (list) {
             list.innerHTML = data.online.length
               ? data.online.map(o => '<div class="live-row"><strong>' + o.profileName + '</strong> <span class="meta">in ' + o.areaName + '</span></div>').join('')
               : '<div class="empty">No players in-world right now</div>';
           }
           if (sessionsList) {
-            sessionsList.innerHTML = data.loggedIn.length
-              ? '<div class="meta" style="margin-bottom:6px;">Connected (not in-world):</div>' + data.loggedIn.map(s => '<div class="live-row"><strong>' + s.profileName + '</strong> <span class="meta">last area: ' + s.areaName + '</span></div>').join('')
+            sessionsList.innerHTML = data.sessions.length
+              ? '<div class="meta" style="margin-bottom:6px;">Logged-in sessions:</div>' + data.sessions.map(s => '<div class="live-row"><strong>' + s.profileName + '</strong> <span class="meta">area: ' + s.areaName + '</span></div>').join('')
               : '';
           }
         } catch {}
@@ -1840,12 +1845,13 @@ const app = new Elysia()
       }))
     }
   )
-  .post("/person/updateattachment", async ({ body }) => {
+  .post("/person/updateattachment", async ({ body, cookie }) => {
     return await accountMutex.runExclusive(async () => {
       console.log("[ATTACHMENT] Received request:", JSON.stringify(body));
       const { id, data, attachments } = body as any;
+      const sessionToken = (cookie as any).s?.value as string | undefined;
 
-      const accountPath = await getAccountPath();
+      const accountPath = await getAccountPath(sessionToken);
       let accountData: Record<string, any> = {};
       
       // Read account data
@@ -1944,10 +1950,11 @@ const app = new Elysia()
     });
   })
   // Set hand color for avatar
-  .post("/person/sethandcolor", async ({ body }) => {
+  .post("/person/sethandcolor", async ({ body, cookie }) => {
     console.log("[HAND COLOR] Received request:", body);
+    const sessionToken = (cookie as any).s?.value as string | undefined;
 
-    const accountPath = await getAccountPath();
+    const accountPath = await getAccountPath(sessionToken);
     let accountData: Record<string, any> = {};
     try {
       accountData = JSON.parse(await fs.readFile(accountPath, "utf-8"));
@@ -1993,17 +2000,19 @@ const app = new Elysia()
     
     if (session && areaId) {
       touchSession(sessionToken);
+      // Update player presence
       updatePlayerPresence(session.personId, session.profileName, areaId);
+      // Update current area in session
       updateSessionArea(sessionToken, areaId);
     } else if (sessionToken) {
       touchSession(sessionToken);
     }
 
-    // PollServerResponse JSON keys (PollServerResponse.cs): vMaj, vMinSrv, pingFromUserId, pingFromUserName, pingAreaId, pingAreaName
     const response: Record<string, unknown> = {
       vMaj: 188,
       vMinSrv: 1
     };
+
     if (session?.personId) {
       const pings = drainPendingPingsForPerson(session.personId);
       if (pings.length > 0) {
@@ -2017,7 +2026,7 @@ const app = new Elysia()
         );
       }
     }
-
+    
     return response;
   })
   .post(
@@ -2042,6 +2051,7 @@ const app = new Elysia()
 
             // Update session's current area
             updateSessionArea(sessionToken, areaId);
+            touchSession(sessionToken);
 
             // Track this area visit for the REQUESTER
             if (requesterProfile) {
@@ -2319,25 +2329,41 @@ const app = new Elysia()
     }
   })
   .post("/area/save",
-    async ({ body }) => {
-      const areaId = body.id || generateObjectId();
+    async ({ body }: { body: any }) => {
+      const payload = body as any;
+      const areaId = payload.id || generateObjectId();
       const filePath = `./data/area/load/${areaId}.json`;
+
+      let existingAreaData: Record<string, any> = {};
+      try {
+        existingAreaData = JSON.parse(await fs.readFile(filePath, "utf-8"));
+      } catch {
+        // New area or unreadable file: proceed with sanitized body as base.
+      }
+
+      const desiredAreaName = payload.name || payload.areaName || existingAreaData.areaName || "Unnamed Area";
+      if (isAreaNameTaken(desiredAreaName, areaId)) {
+        return new Response(JSON.stringify({ ok: false, error: "An area with this name already exists" }), {
+          status: 409,
+          statusText: "An area with this name already exists",
+          headers: { "Content-Type": "application/json", "X-Error-Message": "An area with this name already exists" }
+        });
+      }
 
       await mkdirWithPermissions("./data/area/load");
       // Align creator identity with account.json (same as /area route)
-      let creatorId = body.creatorId;
+      let creatorId = payload.creatorId;
       try {
         const account = await getAccountDataForCurrentProfile();
         if (account?.personId) creatorId = account.personId;
       } catch { }
       const sanitizedBody = {
-        ...body,
-        areaName: body.name || body.areaName || "Unnamed Area",
+        ...payload,
+        areaName: desiredAreaName,
         creatorId
       };
       // Never replace an existing area load file with a potentially partial payload.
       // Merge incoming data into the current file so required metadata survives.
-      let existingAreaData: Record<string, any> = {};
       try {
         existingAreaData = JSON.parse(await fs.readFile(filePath, "utf-8"));
       } catch {
@@ -2370,7 +2396,7 @@ const app = new Elysia()
           // Add the new area to the user's areas list
           const newArea = {
             id: areaId,
-            name: body.name || "Unnamed Area",
+            name: desiredAreaName,
             playerCount: 0,
             isPrivate: false
           };
@@ -2380,20 +2406,34 @@ const app = new Elysia()
           if (!exists) {
             areasearchData.areas.push(newArea);
             await writeFileWithPermissions(areasearchPath, JSON.stringify(areasearchData, null, 2));
-            console.log(`[AREASEARCH] Added area ${areaId} (${body.name}) to user's created areas list`);
+            console.log(`[AREASEARCH] Added area ${areaId} (${desiredAreaName}) to user's created areas list`);
           }
         }
       } catch (error) {
         console.warn("Could not update user's areasearch file:", error);
       }
 
-      areaIndex.push({
-        name: body.name,
-        description: body.description || "",
-        id: areaId,
-        playerCount: 0
-      });
-      areaByUrlName.set(body.name.replace(/[^-_a-z0-9]/gi, "").toLowerCase(), areaId);
+      const existingIndexEntry = areaIndex.find((a: any) => a.id === areaId);
+      if (existingIndexEntry) {
+        existingIndexEntry.name = desiredAreaName;
+        existingIndexEntry.description = payload.description || existingIndexEntry.description || "";
+      } else {
+        areaIndex.push({
+          name: desiredAreaName,
+          description: payload.description || "",
+          id: areaId,
+          playerCount: 0
+        });
+      }
+
+      const normalizedUrlName = normalizeAreaName(desiredAreaName);
+      if (existingAreaData.areaName) {
+        const previousUrlName = normalizeAreaName(existingAreaData.areaName);
+        if (previousUrlName && previousUrlName !== normalizedUrlName) {
+          areaByUrlName.delete(previousUrlName);
+        }
+      }
+      areaByUrlName.set(normalizedUrlName, areaId);
       await mkdirWithPermissions("./cache");
       await writeFileWithPermissions("./cache/areaIndex.json", JSON.stringify(areaIndex));
 
@@ -2509,8 +2549,9 @@ const app = new Elysia()
     },
     { body: t.Object({ term: t.String(), byCreatorId: t.Optional(t.String()), byCreatorName: t.Optional(t.String()) }) }
   )
-  .post("/user/setName", async ({ body }) => {
+  .post("/user/setName", async ({ body, cookie }) => {
     const { newName } = body;
+    const sessionToken = (cookie as any).s?.value as string | undefined;
 
     if (!newName || typeof newName !== "string" || newName.length < 3) {
       return new Response(JSON.stringify({ ok: false, error: "Invalid name" }), {
@@ -2519,7 +2560,7 @@ const app = new Elysia()
       });
     }
 
-    const accountPath = await getAccountPath();
+    const accountPath = await getAccountPath(sessionToken);
     let accountData: Record<string, any> = {};
     try {
       accountData = JSON.parse(await fs.readFile(accountPath, "utf-8"));
@@ -2630,6 +2671,63 @@ const app = new Elysia()
       totalSearchablePublicAreas: canned_areaList.totalSearchablePublicAreas + dynamic.totalSearchablePublicAreas
     };
   })
+  .post("/area/sethome", async ({ body, cookie }) => {
+    const { areaId } = body as any;
+    if (!areaId || typeof areaId !== "string") {
+      return new Response(JSON.stringify({ ok: false, error: "Missing areaId" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
+    const sessionToken = (cookie as any).s?.value as string | undefined;
+    const session = getSessionFromToken(sessionToken);
+    if (!session) {
+      return new Response(JSON.stringify({ ok: false, error: "Not authenticated" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
+    const account = await loadAccountData(session.profileName);
+    if (!account) {
+      return new Response(JSON.stringify({ ok: false, error: "Account not found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
+    const ownedAreas = account.ownedAreas || [];
+    if (areaId !== account.homeAreaId && !ownedAreas.includes(areaId)) {
+      return new Response(JSON.stringify({ ok: false, error: "You can only set home to an area you own" }), {
+        status: 403,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
+    const loadFile = createFileHandle(`./data/area/load/${areaId}.json`);
+    if (!(await loadFile.exists())) {
+      return new Response(JSON.stringify({ ok: false, error: "Area not found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
+    account.homeAreaId = areaId;
+    if (!ownedAreas.includes(areaId)) {
+      account.ownedAreas = [...ownedAreas, areaId];
+    }
+
+    const accountPath = await getAccountPath(sessionToken);
+    await writeFileWithPermissions(accountPath, JSON.stringify(account, null, 2));
+
+    return new Response(JSON.stringify({ ok: true, homeAreaId: areaId }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    });
+  }, {
+    body: t.Object({ areaId: t.String() })
+  })
   .get("/repair-home-area", async () => {
     const areaBase = "./data/area";
 
@@ -2683,6 +2781,14 @@ const app = new Elysia()
     const areaName = body?.name;
     if (!areaName || typeof areaName !== "string") {
       return new Response("Missing area name", { status: 400 });
+    }
+
+    if (isAreaNameTaken(areaName)) {
+      return new Response(JSON.stringify({ ok: false, error: "An area with this name already exists" }), {
+        status: 409,
+        statusText: "An area with this name already exists",
+        headers: { "Content-Type": "application/json", "X-Error-Message": "An area with this name already exists" }
+      });
     }
 
     // Get profile from session cookie
@@ -2848,7 +2954,7 @@ const app = new Elysia()
     await writeFileWithPermissions(listPath, JSON.stringify(areaList, null, 2));
 
     // ✅ Inject area into account.json under ownedAreas
-    const accountPath = await getAccountPath();
+    const accountPath = await getAccountPath(sessionToken);
     try {
       const accountFile = createFileHandle(accountPath);
       let accountData = await accountFile.json();
@@ -3112,13 +3218,14 @@ const app = new Elysia()
 			// Check for duplicate area names (case-insensitive)
 			const newUrlName = trimmedName.replace(/[^-_a-z0-9]/gi, "").toLowerCase();
 			const existingAreaId = areaByUrlName.get(newUrlName);
-			if (existingAreaId && existingAreaId !== areaId) {
-				console.log(`[AREA RENAME] Duplicate name rejected: "${trimmedName}" already exists as area ${existingAreaId}`);
-				return new Response(JSON.stringify({ ok: false, error: "An area with this name already exists" }), { 
-					status: 409, 
-					headers: { "Content-Type": "application/json" } 
-				});
-			}
+      if (existingAreaId && existingAreaId !== areaId) {
+        console.log(`[AREA RENAME] Duplicate name rejected: "${trimmedName}" already exists as area ${existingAreaId}`);
+        return new Response(JSON.stringify({ ok: false, error: "An area with this name already exists" }), { 
+          status: 409, 
+          statusText: "An area with this name already exists",
+          headers: { "Content-Type": "application/json", "X-Error-Message": "An area with this name already exists" } 
+        });
+      }
 			
 			// Update load file
 			const areaData = await loadFile.json();
@@ -3216,6 +3323,14 @@ const app = new Elysia()
 				}
 			} catch (arealistError) {
 				console.warn(`[AREA RENAME] Could not update arealist.json:`, arealistError);
+			}
+
+			try {
+				await mkdirWithPermissions("./cache");
+				await writeFileWithPermissions("./cache/areaIndex.json", JSON.stringify(areaIndex, null, 2));
+				console.log("[AREA RENAME] Updated cache/areaIndex.json");
+			} catch (cacheError) {
+				console.warn("[AREA RENAME] Could not persist area index cache:", cacheError);
 			}
 			
 			console.log(`[AREA RENAME] Renamed area ${areaId} from "${oldName}" to "${trimmedName}"`);
@@ -3644,6 +3759,17 @@ const app = new Elysia()
     body: t.Object({ id: t.String() }),
     type: "form"
   })
+  .get("person/friendsbystr", async ({ cookie }) => {
+    const sessionToken = (cookie as any).s?.value as string | undefined;
+    const session = getSessionFromToken(sessionToken);
+    if (!session?.personId) return canned_friendsbystr;
+    try {
+      return await getFriendsByStrengthResponse(session.personId);
+    } catch (error) {
+      console.error("[FRIENDS BY STR] Error:", error);
+      return canned_friendsbystr;
+    }
+  })
   .post("/person/ping", async ({ body, cookie }) => {
     const targetId = (body as any).userId || (body as any).id;
     const areaId = (body as any).areaId as string | undefined;
@@ -3680,7 +3806,7 @@ const app = new Elysia()
     }
 
     const fromScreenName = await getScreenNameForPerson(session.personId, session.profileName);
-    const areaName = await resolveAreaNameForPing(inviteAreaId);
+    const areaName = getAreaDisplayName(inviteAreaId);
     queuePendingPing(targetId, {
       fromPersonId: session.personId,
       fromScreenName,
@@ -3749,17 +3875,6 @@ const app = new Elysia()
     }),
     type: "form"
   })
-  .get("person/friendsbystr", async ({ cookie }) => {
-    const sessionToken = (cookie as any).s?.value as string | undefined;
-    const session = getSessionFromToken(sessionToken);
-    if (!session?.personId) return canned_friendsbystr;
-    try {
-      return await getFriendsByStrengthResponse(session.personId);
-    } catch (error) {
-      console.error("[FRIENDS BY STR] Error:", error);
-      return canned_friendsbystr;
-    }
-  })
   .post("/placement/save", async ({ body: { areaId, placementId, data }, cookie }) => {
     if (!areaId || !placementId || !data) {
       console.error("Missing required placement fields");
@@ -3798,6 +3913,117 @@ const app = new Elysia()
       areaId: t.String(),
       placementId: t.String(),
       data: t.Unknown()
+    })
+  })
+  .post("/placement/copyall", async ({ body, cookie }) => {
+    const requestBody = body as any;
+    const fromAreaId = requestBody.fromAreaId || requestBody.sourceAreaId;
+    const toAreaId = requestBody.toAreaId || requestBody.destinationAreaId;
+    if (!fromAreaId || !toAreaId || typeof fromAreaId !== "string" || typeof toAreaId !== "string") {
+      return new Response(JSON.stringify({ ok: false, error: "Missing source or target area id" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+    if (fromAreaId === toAreaId) {
+      return new Response(JSON.stringify({ ok: false, error: "Source and target area cannot be the same" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
+    const sessionToken = (cookie as any).s?.value as string | undefined;
+    const session = getSessionFromToken(sessionToken);
+    if (!session) {
+      return new Response(JSON.stringify({ ok: false, error: "Not authenticated" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
+    const account = await loadAccountData(session.profileName);
+    if (!account) {
+      return new Response(JSON.stringify({ ok: false, error: "Account not found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
+    const ownedAreas = account.ownedAreas || [];
+    if (toAreaId !== account.homeAreaId && !ownedAreas.includes(toAreaId)) {
+      return new Response(JSON.stringify({ ok: false, error: "Not allowed to modify target area" }), {
+        status: 403,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
+    const sourcePath = `./data/area/load/${fromAreaId}.json`;
+    const targetPath = `./data/area/load/${toAreaId}.json`;
+    let sourceAreaData: Record<string, any>;
+    let targetAreaData: Record<string, any>;
+
+    try {
+      sourceAreaData = JSON.parse(await fs.readFile(sourcePath, "utf-8"));
+    } catch (error) {
+      return new Response(JSON.stringify({ ok: false, error: "Source area not found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
+    try {
+      targetAreaData = JSON.parse(await fs.readFile(targetPath, "utf-8"));
+    } catch (error) {
+      return new Response(JSON.stringify({ ok: false, error: "Target area not found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
+    const sourcePlacements = Array.isArray(sourceAreaData.placements) ? sourceAreaData.placements : [];
+    const targetPlacements = Array.isArray(targetAreaData.placements) ? targetAreaData.placements : [];
+    const existingIds = new Set(targetPlacements.map((p: any) => p.Id));
+    const targetDir = path.resolve("./data/placement/info/", toAreaId);
+    await mkdirWithPermissions(targetDir);
+
+    let count = 0;
+    for (const placement of sourcePlacements) {
+      if (!placement || !placement.Id) continue;
+      let placementId = placement.Id;
+      if (existingIds.has(placementId)) {
+        placementId = `${placementId}-${randomUUID().replace(/-/g, "").slice(0, 8)}`;
+      }
+
+      const copiedPlacement = {
+        ...placement,
+        Id: placementId,
+        placerId: account.personId || "unknown",
+        placerName: account.screenName || "anonymous"
+      };
+
+      const placementPath = path.join(targetDir, placementId + ".json");
+      await writeFileWithPermissions(placementPath, JSON.stringify(copiedPlacement, null, 2));
+
+      if (!existingIds.has(placementId)) {
+        targetPlacements.push(copiedPlacement);
+        existingIds.add(placementId);
+      }
+      count++;
+    }
+
+    targetAreaData.placements = targetPlacements;
+    await writeFileWithPermissions(targetPath, JSON.stringify(targetAreaData, null, 2));
+
+    return new Response(JSON.stringify({ ok: true, copied: count }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    });
+  }, {
+    body: t.Object({
+      fromAreaId: t.Optional(t.String()),
+      sourceAreaId: t.Optional(t.String()),
+      toAreaId: t.Optional(t.String()),
+      destinationAreaId: t.Optional(t.String())
     })
   })
   .post("/placement/delete", async ({ body: { areaId, placementId } }) => {
@@ -4242,11 +4468,12 @@ const app = new Elysia()
       isFindable: t.Optional(t.Boolean())
     })
   })
-  .get("/inventory/:page", async ({ params }) => {
+  .get("/inventory/:page", async ({ params, cookie }) => {
     const pageParam = params?.page;
     const page = Math.max(0, parseInt(String(pageParam), 10) || 0);
+    const sessionToken = (cookie as any).s?.value as string | undefined;
 
-    const accountPath = await getAccountPath();
+    const accountPath = await getAccountPath(sessionToken);
     let account: Record<string, any> = {};
     try {
       account = JSON.parse(await fs.readFile(accountPath, "utf-8"));
@@ -4288,14 +4515,15 @@ const app = new Elysia()
       headers: { "Content-Type": "application/json" }
     });
   })
-  .post("/inventory/save", async ({ body }) => {
+  .post("/inventory/save", async ({ body, cookie }) => {
     // Accept one of:
     // - { ids: [...] }
     // - { id: "..." }
     // - { page: number|string, inventoryItem: string }  // from client logs
     const invUpdate = body as any;
+    const sessionToken = (cookie as any).s?.value as string | undefined;
 
-    const accountPath = await getAccountPath();
+    const accountPath = await getAccountPath(sessionToken);
     let accountData: Record<string, any> = {};
     try {
       accountData = JSON.parse(await fs.readFile(accountPath, "utf-8"));
@@ -4351,9 +4579,10 @@ const app = new Elysia()
     body: t.Unknown(),
     type: "form"
   })
-  .post("/inventory/delete", async ({ body }) => {
+  .post("/inventory/delete", async ({ body, cookie }) => {
     // Delete item from inventory: { page: number|string, thingId: string }
     const { page, thingId } = body as any;
+    const sessionToken = (cookie as any).s?.value as string | undefined;
 
     if (page === undefined || thingId === undefined) {
       return new Response(JSON.stringify({ ok: false, error: "Missing page or thingId" }), {
@@ -4362,7 +4591,7 @@ const app = new Elysia()
       });
     }
 
-    const accountPath = await getAccountPath();
+    const accountPath = await getAccountPath(sessionToken);
     let accountData: Record<string, any> = {};
     try {
       accountData = JSON.parse(await fs.readFile(accountPath, "utf-8"));
@@ -4430,7 +4659,7 @@ const app = new Elysia()
       });
     }
 
-    const accountPath = await getAccountPath();
+    const accountPath = await getAccountPath(sessionToken);
     let accountData: Record<string, any> = {};
     try {
       accountData = JSON.parse(await fs.readFile(accountPath, "utf-8"));
@@ -4484,11 +4713,12 @@ const app = new Elysia()
     }),
     type: "form"
   })
-  .post("/inventory/update", async ({ body }) => {
+  .post("/inventory/update", async ({ body, cookie }) => {
     // Mirror /inventory/save behavior; some clients call update
     const invUpdate = body as any;
+    const sessionToken = (cookie as any).s?.value as string | undefined;
 
-    const accountPath = await getAccountPath();
+    const accountPath = await getAccountPath(sessionToken);
     let accountData: Record<string, any> = {};
     try {
       accountData = JSON.parse(await fs.readFile(accountPath, "utf-8"));
