@@ -87,6 +87,11 @@ class AsyncMutex {
 const accountMutex = new AsyncMutex();
 const textEncoder = new TextEncoder();
 
+function daysOld(ts: number) {
+  const now = Date.now();
+  return Math.floor((now - ts) / 86400000);
+}
+
 const ACCOUNTS_DIR = "./data/person/accounts";
 
 // Track the currently active profile (for admin panel display only)
@@ -984,6 +989,35 @@ async function deleteProfile(profileName: string): Promise<{ ok: boolean; error?
 
 const areaIndex: { name: string, description?: string, id: string, playerCount: number }[] = [];
 const areaByUrlName = new Map<string, string>()
+const areaSelectionStats = new Map<string, { totalVisitors: number; placementsCount: number }>();
+
+async function readAreaSelectionStats(areaId: string) {
+  const cached = areaSelectionStats.get(areaId);
+  if (cached) return cached;
+
+  let totalVisitors = 0;
+  let placementsCount = 0;
+
+  try {
+    const infoFile = createFileHandle(`./data/area/info/${areaId}.json`);
+    if (await infoFile.exists()) {
+      const info = await infoFile.json();
+      totalVisitors = typeof info.totalVisitors === "number" ? info.totalVisitors : 0;
+    }
+  } catch {}
+
+  try {
+    const loadFile = createFileHandle(`./data/area/load/${areaId}.json`);
+    if (await loadFile.exists()) {
+      const loadData = await loadFile.json();
+      placementsCount = Array.isArray(loadData?.placements) ? loadData.placements.length : 0;
+    }
+  } catch {}
+
+  const stats = { totalVisitors, placementsCount };
+  areaSelectionStats.set(areaId, stats);
+  return stats;
+}
 
 console.log("building area index...")
 const cacheFile = createFileHandle("./cache/areaIndex.json");
@@ -1069,6 +1103,8 @@ if (areaIndex.length === 0) {
   await writeFileWithPermissions("./cache/areaIndex.json", JSON.stringify(areaIndex));
 }
 
+await Promise.all(areaIndex.map((entry) => readAreaSelectionStats(entry.id)));
+
 const normalizeAreaName = (name: string): string => {
   return name.replace(/[^-_a-z0-9]/gi, "").toLowerCase();
 }
@@ -1086,6 +1122,42 @@ const searchArea = (term: string) => {
 const findAreaByUrlName = (areaUrlName: string) => {
   return areaByUrlName.get(areaUrlName)
 }
+
+const getRandomAreaPayload = async () => {
+  if (areaIndex.length === 0) {
+    return { ok: false, error: "No areas available", status: 404 };
+  }
+
+  const scoredAreas = areaIndex.map((areaEntry) => {
+    const stats = areaSelectionStats.get(areaEntry.id) || { totalVisitors: 0, placementsCount: 0 };
+    const weight = 1
+      + Math.pow(stats.totalVisitors + 1, 1.5) * 1.5
+      + Math.pow(stats.placementsCount + 1, 2.0) * 3.0;
+    return { area: areaEntry, weight };
+  });
+
+  const totalWeight = scoredAreas.reduce((sum, entry) => sum + entry.weight, 0);
+  let roll = Math.random() * totalWeight;
+  let chosenArea = scoredAreas[0].area;
+
+  for (const entry of scoredAreas) {
+    roll -= entry.weight;
+    if (roll <= 0) {
+      chosenArea = entry.area;
+      break;
+    }
+  }
+
+  const areaUrlName = normalizeAreaName(chosenArea.name);
+  console.log(`[AREA RANDOM] Selected area: ${chosenArea.name} (${chosenArea.id})`);
+
+  return {
+    areaId: chosenArea.id,
+    areaName: chosenArea.name,
+    areaUrlName,
+    ok: true
+  };
+};
 
 // ==================== THING SEARCH INDEX ====================
 interface ThingIndexEntry {
@@ -2133,6 +2205,7 @@ const app = new Elysia()
 
             return {
               ...areaData,
+              ageDays: daysOld(areaData.createdAt),
               forceEditMode: hasEditPermission,
               requestorIsEditor: hasEditPermission,
               requestorIsListEditor: hasEditPermission,
@@ -2243,6 +2316,7 @@ const app = new Elysia()
 
             return {
               ...areaData,
+              ageDays: daysOld(areaData.createdAt),
               requestorIsEditor: hasEditPermission,
               requestorIsListEditor: hasEditPermission,
               requestorIsOwner: isOwner,
@@ -2279,7 +2353,7 @@ const app = new Elysia()
         try {
           const data = await file.json();
           console.log(`[AREA INFO] Loaded info for area ${areaId}`);
-          return data;
+          return { ...data, ageDays: daysOld(data.createdAt) };
         } catch (err) {
           console.error(`[AREA INFO] Error parsing info for area ${areaId}:`, err);
           return { ok: false, error: "Failed to parse area info" };
@@ -2293,39 +2367,12 @@ const app = new Elysia()
   )
   .get("/area/random", async () => {
     try {
-      // Get all available areas from the index
-      if (areaIndex.length === 0) {
-        return new Response(JSON.stringify({
-          ok: false,
-          error: "No areas available"
-        }), {
-          status: 404,
-          headers: { "Content-Type": "application/json" }
-        });
-      }
-
-      // Pick a random area
-      const randomIndex = Math.floor(Math.random() * areaIndex.length);
-      const randomArea = areaIndex[randomIndex];
-
-      console.log(`[AREA RANDOM] Selected area: ${randomArea.name} (${randomArea.id})`);
-
-      // Return area info in the format expected by the client
-      return {
-        areaId: randomArea.id,
-        areaName: randomArea.name,
-        areaUrlName: randomArea.name.replace(/[^-_a-z0-9]/gi, "").toLowerCase(),
-        ok: true
-      };
+      const payload = await getRandomAreaPayload();
+      const status = typeof payload.status === "number" ? payload.status : 200;
+      return Response.json(payload, { status });
     } catch (error) {
       console.error("[AREA RANDOM] Error:", error);
-      return new Response(JSON.stringify({
-        ok: false,
-        error: "Failed to get random area"
-      }), {
-        status: 500,
-        headers: { "Content-Type": "application/json" }
-      });
+      return Response.json({ ok: false, error: "Failed to get random area" }, { status: 500 });
     }
   })
   .post("/area/save",
@@ -3610,7 +3657,8 @@ const app = new Elysia()
       const metadata = {
         placerId: parsed.placerId || "unknown",
         placerName: parsed.placerName || "anonymous",
-        placedDaysAgo: parsed.placedDaysAgo || 0
+        placedDaysAgo: daysOld(parsed.createdAt),
+        ageDays: daysOld(parsed.createdAt)
       };
 
       return new Response(JSON.stringify(metadata), {
@@ -4159,7 +4207,7 @@ const app = new Elysia()
       screenName = account.screenName || screenName;
     } catch { }
 
-    const newPlacements = placements.map((encoded: string) => {
+        const newPlacements = placements.map((encoded: string) => {
       const parsed = JSON.parse(decodeURIComponent(encoded));
       return {
         Id: parsed.Id,
@@ -4171,7 +4219,7 @@ const app = new Elysia()
         D: parsed.D || {},
         placerId: personId,
         placerName: screenName,
-        placedDaysAgo: 0
+        createdAt: Date.now()
       };
     });
 
@@ -4371,6 +4419,7 @@ const app = new Elysia()
       
       console.log(`[PERSON INFO] User ${userId} in area ${areaId}: isEditor=${personData.isEditorHere}, isOwner=${personData.isOwnerHere}, requestorIsOwner=${personData.requestorIsOwner}`);
       
+      personData.ageDays = daysOld(personData.createdAt);
       return personData;
     },
     { body: t.Object({ areaId: t.String(), userId: t.String() }) }
@@ -4860,8 +4909,8 @@ const app = new Elysia()
       id: thingId,
       name: thingName,
       creatorId,
-      creatorName,
-      createdDaysAgo: 0,
+            creatorName,
+      createdAt: Date.now(),
       collectedCount: 0,
       placedCount: 1,
       allCreatorsThingsClonable: true,
@@ -5334,8 +5383,9 @@ const app = new Elysia()
         id: parsed.id || id,
         name: parsed.name || "",
         creatorId: parsed.creatorId,
+        ageDays: daysOld(parsed.createdAt),
         creatorName: parsed.creatorName,
-        createdDaysAgo: parsed.createdDaysAgo || 0,
+                createdDaysAgo: daysOld(parsed.createdAt),
         collectedCount: parsed.collectedCount || 0,
         placedCount: parsed.placedCount || 0,
         allCreatorsThingsClonable: parsed.allCreatorsThingsClonable ?? true,
