@@ -2509,7 +2509,7 @@ const app = new Elysia()
       return Response.json({ ok: false, error: "Failed to get random area" }, { status: 500 });
     }
   })
-  .post("/area/save",", 
+  .post("/area/save", 
     async ({ body, cookie }: { body: any; cookie: any }) => {
       const payload = body as any;
       const areaId = payload.id || generateObjectId();
@@ -2596,6 +2596,7 @@ const app = new Elysia()
             await writeFileWithPermissions(areasearchPath, JSON.stringify(areasearchData, null, 2));
             console.log(`[AREASEARCH] Added area ${areaId} (${desiredAreaName}) to user's created areas list`);
           }
+        }
         }
       } catch (error) {
         console.warn("Could not update user's areasearch file:", error);
@@ -2888,6 +2889,22 @@ const app = new Elysia()
     // Get total online players
     const totalOnline = getTotalOnlinePlayers();
 
+    // Build user's personal favorites from their account
+    let userFavorites: any[] = [];
+    if (effectiveProfile) {
+      try {
+        const profileAccountPath = `./data/person/accounts/${effectiveProfile}.json`;
+        const accountData = JSON.parse(await fs.readFile(profileAccountPath, "utf-8"));
+        const userFavoriteAreaIds = accountData.favoriteAreas || [];
+        for (const favId of userFavoriteAreaIds) {
+          const indexEntry = areaIndex.find((a: any) => a.id === favId);
+          if (indexEntry) {
+            userFavorites.push({ id: favId, name: indexEntry.name, playerCount: 0 });
+          }
+        }
+      } catch { }
+    }
+
     return {
       visited: withLivePlayerCounts(userVisitedAreas),
       created: withLivePlayerCounts(userCreated),
@@ -2897,22 +2914,6 @@ const app = new Elysia()
       popularNew: withLivePlayerCounts([...canned_areaList.popularNew, ...dynamic.popularNew]),
       popularNew_rnd: withLivePlayerCounts([...canned_areaList.popularNew_rnd, ...dynamic.popularNew_rnd]),
       lively: livelyAreas,
-      // Build user's personal favorites from their account
-      let userFavorites: any[] = [];
-      if (effectiveProfile) {
-        try {
-          const profileAccountPath = `./data/person/accounts/${effectiveProfile}.json`;
-          const accountData = JSON.parse(await fs.readFile(profileAccountPath, "utf-8"));
-          const userFavoriteAreaIds = accountData.favoriteAreas || [];
-          for (const favId of userFavoriteAreaIds) {
-            const indexEntry = areaIndex.find((a: any) => a.id === favId);
-            if (indexEntry) {
-              userFavorites.push({ id: favId, name: indexEntry.name, playerCount: 0 });
-            }
-          }
-        } catch { }
-      }
-
       favorite: withLivePlayerCounts(userFavorites),
       mostFavorited: withLivePlayerCounts([...canned_areaList.mostFavorited, ...dynamic.mostFavorited]),
       totalOnline: totalOnline,
@@ -3833,7 +3834,7 @@ const app = new Elysia()
 		console.log("[REGISTERUSAGEMODE] Received:", body);
 		return { ok: true };
 	})
-  .post("/area/visit"}]</parameter> <parameter=path> <parameter=path> <parameter=path> <parameter=path> <parameter=path> <parameter=path> legnux example/game-server.ts</parameter> <parameter=path> legnux example/game-server.ts</parameter> <parameter=path> legnux example/game-server.ts</parameter> <parameter=path> legnux example/game-server.ts</parameter> <parameter=path> legnux example/game-server.ts</parameter> <parameter=path> legnux example/game-server.ts</parameter> </function> <parameter=edits> [ <parameter=edits> [ <parameter=edits> [ <parameter=edits> [ <parameter=edits> [ <parameter=edits> [ {, async ({ body, cookie }) => {
+  .post("/area/visit", async ({ body, cookie }) => {
     const { areaId, name } = body;
     if (!areaId || !name) return new Response("Missing data", { status: 400 });
 
