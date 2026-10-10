@@ -2110,9 +2110,10 @@ const app = new Elysia()
     };
 
     if (session?.personId) {
-      const pings = drainPendingPingsForPerson(session.personId);
-      if (pings.length > 0) {
-        const latest = pings[pings.length - 1];
+      const pings = pendingPingsByPersonId.get(session.personId) || [];
+      const validPings = pings.filter(p => (Date.now() - p.createdAt) < PING_EXPIRY_MS);
+      if (validPings.length > 0) {
+        const latest = validPings[validPings.length - 1];
         response.pingFromUserId = latest.fromPersonId;
         response.pingFromUserName = latest.fromScreenName;
         response.pingAreaId = latest.areaId;
@@ -2144,6 +2145,30 @@ const app = new Elysia()
           try {
             const areaData = await file.json();
             console.log(`[AREA LOAD] ✅ Loaded area ${areaId} (${areaData.areaName || 'unnamed'})`);
+
+            // Check private area access
+            if (areaData.isPrivate) {
+              const areaInfoPath = path.resolve("./data/area/info/", areaId + ".json");
+              let isEditor = false;
+              let isOwner = false;
+              try {
+                const areaInfoFile = createFileHandle(areaInfoPath);
+                if (await areaInfoFile.exists()) {
+                  const areaInfo = await areaInfoFile.json();
+                  isEditor = areaInfo.editors?.some((editor: any) => editor.id === requesterId) || false;
+                  isOwner = areaInfo.editors?.some((editor: any) => editor.id === requesterId && editor.isOwner) || false;
+                }
+              } catch { }
+              if (!isEditor && !isOwner) {
+                const pings = pendingPingsByPersonId.get(requesterId) || [];
+                const validPing = pings.find(p => p.areaId === areaId && (Date.now() - p.createdAt) < PING_EXPIRY_MS);
+                if (!validPing) {
+                  console.log(`[AREA LOAD] ❌ Private area blocked for ${requesterProfile}`);
+                  return Response.json({ "ok": false, "_reasonDenied": "Private", "serveTime": 13 }, { status: 200 });
+                }
+                pendingPingsByPersonId.set(requesterId, pings.filter(p => !(p.areaId === areaId && (Date.now() - p.createdAt) < PING_EXPIRY_MS)));
+              }
+            }
 
             // Update session's current area
             updateSessionArea(sessionToken, areaId);
@@ -2272,6 +2297,30 @@ const app = new Elysia()
             console.log(`[AREA LOAD] ✅ Found and loading area by URL name: ${areaUrlName}`);
 
             const areaData = await file.json();
+
+            // Check private area access
+            if (areaData.isPrivate) {
+              const areaInfoPath = path.resolve("./data/area/info/", foundAreaId + ".json");
+              let isEditor = false;
+              let isOwner = false;
+              try {
+                const areaInfoFile = createFileHandle(areaInfoPath);
+                if (await areaInfoFile.exists()) {
+                  const areaInfo = await areaInfoFile.json();
+                  isEditor = areaInfo.editors?.some((editor: any) => editor.id === requesterId) || false;
+                  isOwner = areaInfo.editors?.some((editor: any) => editor.id === requesterId && editor.isOwner) || false;
+                }
+              } catch { }
+              if (!isEditor && !isOwner) {
+                const pings = pendingPingsByPersonId.get(requesterId) || [];
+                const validPing = pings.find(p => p.areaId === foundAreaId && (Date.now() - p.createdAt) < PING_EXPIRY_MS);
+                if (!validPing) {
+                  console.log(`[AREA LOAD] ❌ Private area blocked for ${requesterProfile}`);
+                  return Response.json({ "ok": false, "_reasonDenied": "Private", "serveTime": 13 }, { status: 200 });
+                }
+                pendingPingsByPersonId.set(requesterId, pings.filter(p => !(p.areaId === foundAreaId && (Date.now() - p.createdAt) < PING_EXPIRY_MS)));
+              }
+            }
 
             // Update session's current area
             updateSessionArea(sessionToken, foundAreaId);
