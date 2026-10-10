@@ -2227,9 +2227,20 @@ const app = new Elysia()
             const bundleExists = await fs.access(bundlePath).then(() => true).catch(() => false);
             console.log(`[AREA LOAD] Bundle ${bundleKey || 'undefined'} exists: ${bundleExists}`);
 
+            // Check if this area is in the user's favorites
+            let isFavorited = false;
+            if (requesterProfile) {
+              try {
+                const profileAccountPath = `./data/person/accounts/${requesterProfile}.json`;
+                const accountData = JSON.parse(await fs.readFile(profileAccountPath, "utf-8"));
+                isFavorited = (accountData.favoriteAreas || []).includes(areaId);
+              } catch { }
+            }
+
             return {
               ...areaData,
               ageDays: daysOld(areaData.createdAt),
+              isFavorited: isFavorited,
               forceEditMode: hasEditPermission,
               requestorIsEditor: hasEditPermission,
               requestorIsListEditor: hasEditPermission,
@@ -2338,9 +2349,20 @@ const app = new Elysia()
             const bundleExists = await fs.access(bundlePath).then(() => true).catch(() => false);
             console.log(`[AREA LOAD] Bundle ${bundleKey || 'undefined'} exists: ${bundleExists}`);
 
+            // Check if this area is in the user's favorites
+            let isFavorited = false;
+            if (requesterProfile) {
+              try {
+                const profileAccountPath = `./data/person/accounts/${requesterProfile}.json`;
+                const accountData = JSON.parse(await fs.readFile(profileAccountPath, "utf-8"));
+                isFavorited = (accountData.favoriteAreas || []).includes(foundAreaId);
+              } catch { }
+            }
+
             return {
               ...areaData,
               ageDays: daysOld(areaData.createdAt),
+              isFavorited: isFavorited,
               requestorIsEditor: hasEditPermission,
               requestorIsListEditor: hasEditPermission,
               requestorIsOwner: isOwner,
@@ -2389,6 +2411,45 @@ const app = new Elysia()
     },
     { body: t.Object({ areaId: t.String() }) }
   )
+  .post(
+    "/area/getflag",
+    ({ }) => ({ isFlagged: false }),
+    { body: t.Object({ id: t.String() }) }
+  )
+  .post(
+    "/area/setfavorite",
+    async ({ body: { areaId }, cookie }) => {
+      const sessionToken = (cookie as any).s?.value as string | undefined;
+      const session = getSessionFromToken(sessionToken);
+      if (!session) {
+        return { ok: false, error: "Not authenticated" };
+      }
+      touchSession(sessionToken);
+      try {
+        const accountPath = getAccountPathForProfile(session.profileName);
+        let accountData: Record<string, any> = {};
+        try {
+          accountData = JSON.parse(await fs.readFile(accountPath, "utf-8"));
+        } catch { }
+        if (!accountData.favoriteAreas) {
+          accountData.favoriteAreas = [];
+        }
+        const index = accountData.favoriteAreas.indexOf(areaId);
+        if (index === -1) {
+          accountData.favoriteAreas.push(areaId);
+        } else {
+          accountData.favoriteAreas.splice(index, 1);
+        }
+        await writeFileWithPermissions(accountPath, JSON.stringify(accountData, null, 2));
+        console.log(`[AREA SETFAVORITE] ${areaId} toggled for ${session.profileName}`);
+        return { ok: true };
+      } catch (err) {
+        console.error("[AREA SETFAVORITE] Error:", err);
+        return { ok: false, error: "Failed to update favorite" };
+      }
+    },
+    { body: t.Object({ areaId: t.String() }) }
+  )
   .get("/area/random", async () => {
     try {
       const payload = await getRandomAreaPayload();
@@ -2399,8 +2460,8 @@ const app = new Elysia()
       return Response.json({ ok: false, error: "Failed to get random area" }, { status: 500 });
     }
   })
-  .post("/area/save",
-    async ({ body }: { body: any }) => {
+  .post("/area/save",", 
+    async ({ body, cookie }: { body: any; cookie: any }) => {
       const payload = body as any;
       const areaId = payload.id || generateObjectId();
       const filePath = `./data/area/load/${areaId}.json`;
@@ -2425,8 +2486,12 @@ const app = new Elysia()
       // Align creator identity with account.json (same as /area route)
       let creatorId = payload.creatorId;
       try {
-        const account = await getAccountDataForCurrentProfile();
-        if (account?.personId) creatorId = account.personId;
+        const sessionToken = (cookie as any).s?.value as string | undefined;
+        const session = getSessionFromToken(sessionToken);
+        if (session) {
+          const account = await loadAccountData(session.profileName);
+          if (account?.personId) creatorId = account.personId;
+        }
       } catch { }
       const sanitizedBody = {
         ...payload,
@@ -2453,8 +2518,11 @@ const app = new Elysia()
 
       // Update user's areasearch file so their created areas appear in search
       try {
-        const account = await getAccountDataForCurrentProfile();
-        if (account.personId) {
+        const sessionToken2 = (cookie as any).s?.value as string | undefined;
+        const session2 = getSessionFromToken(sessionToken2);
+        if (session2) {
+          const account = await loadAccountData(session2.profileName);
+          if (account.personId) {
           const areasearchPath = `./data/person/areasearch/${account.personId}.json`;
 
           let areasearchData = { areas: [], ownPrivateAreas: [] };
@@ -2780,7 +2848,23 @@ const app = new Elysia()
       popularNew: withLivePlayerCounts([...canned_areaList.popularNew, ...dynamic.popularNew]),
       popularNew_rnd: withLivePlayerCounts([...canned_areaList.popularNew_rnd, ...dynamic.popularNew_rnd]),
       lively: livelyAreas,
-      favorite: withLivePlayerCounts([...canned_areaList.favorite, ...dynamic.favorite]),
+      // Build user's personal favorites from their account
+      let userFavorites: any[] = [];
+      if (effectiveProfile) {
+        try {
+          const profileAccountPath = `./data/person/accounts/${effectiveProfile}.json`;
+          const accountData = JSON.parse(await fs.readFile(profileAccountPath, "utf-8"));
+          const userFavoriteAreaIds = accountData.favoriteAreas || [];
+          for (const favId of userFavoriteAreaIds) {
+            const indexEntry = areaIndex.find((a: any) => a.id === favId);
+            if (indexEntry) {
+              userFavorites.push({ id: favId, name: indexEntry.name, playerCount: 0 });
+            }
+          }
+        } catch { }
+      }
+
+      favorite: withLivePlayerCounts(userFavorites),
       mostFavorited: withLivePlayerCounts([...canned_areaList.mostFavorited, ...dynamic.mostFavorited]),
       totalOnline: totalOnline,
       totalAreas: canned_areaList.totalAreas + dynamic.totalAreas,
@@ -2845,11 +2929,14 @@ const app = new Elysia()
   }, {
     body: t.Object({ areaId: t.String() })
   })
-  .get("/repair-home-area", async () => {
+  .get("/repair-home-area", async ({ cookie }) => {
     const areaBase = "./data/area";
 
     try {
-      const account = await getAccountDataForCurrentProfile();
+      const sessionToken = (cookie as any).s?.value as string | undefined;
+      const session = getSessionFromToken(sessionToken);
+      if (!session) return new Response("No session", { status: 401 });
+      const account = await loadAccountData(session.profileName);
       const homeId = account.homeAreaId;
       if (!homeId) return new Response("No homeAreaId found", { status: 400 });
 
@@ -2922,11 +3009,8 @@ const app = new Elysia()
       if (effectiveProfile) {
         account = await loadAccountData(effectiveProfile);
       }
-      if (!account) {
-        account = await getAccountDataForCurrentProfile();
-      }
-      personId = account.personId;
-      personName = account.screenName;
+      personId = account?.personId || "unknown";
+      personName = account?.screenName || "anonymous";
 
       if (!personId || !personName) {
         throw new Error("Missing personId or screenName");
@@ -3509,9 +3593,10 @@ const app = new Elysia()
 					const currentUserId = accountData.personId;
 					
 					const isOwner = infoData.editors?.some((editor: any) => editor.id === currentUserId && editor.isOwner) || false;
-					if (!isOwner) {
-						console.log(`[AREA SETEDITOR] Permission denied: ${effectiveProfile} is not the owner of ${areaId}`);
-						return new Response(JSON.stringify({ ok: false, error: "Only the owner can modify editors" }), { 
+					const isListEditor = infoData.listEditors?.some((le: any) => le.id === currentUserId) || false;
+					if (!isOwner && !isListEditor) {
+						console.log(`[AREA SETEDITOR] Permission denied: ${effectiveProfile} is not the owner or list editor of ${areaId}`);
+						return new Response(JSON.stringify({ ok: false, error: "Only the owner or list editors can modify editors" }), { 
 							status: 403, 
 							headers: { "Content-Type": "application/json" } 
 						});
@@ -3587,12 +3672,119 @@ const app = new Elysia()
 		}),
 		type: "form"
 	})
+	.post("/area/setlisteditor", async ({ body, cookie }) => {
+		const { areaId, userId, isListEditor } = body as any;
+		const personId = userId;
+
+		if (!areaId || !personId) {
+			return new Response(JSON.stringify({ ok: false, error: "Missing areaId or personId" }), {
+				status: 400,
+				headers: { "Content-Type": "application/json" }
+			});
+		}
+
+		// Get profile from session cookie
+		const sessionToken = (cookie as any).s?.value as string | undefined;
+		const session = getSessionFromToken(sessionToken);
+		const effectiveProfile = session?.profileName || null;
+		console.log(`[AREA SETLISTEDITOR] Request to modify listEditors for ${areaId} by ${effectiveProfile}`);
+
+		const infoPath = `./data/area/info/${areaId}.json`;
+
+		try {
+			const infoFile = Bun.file(infoPath);
+			if (!await infoFile.exists()) {
+				console.log(`[AREA SETLISTEDITOR] Area info not found: ${areaId}`);
+				return new Response(JSON.stringify({ ok: false, error: "Area not found" }), {
+					status: 404,
+					headers: { "Content-Type": "application/json" }
+				});
+			}
+
+			const infoData = await infoFile.json();
+
+			// Check if the requester is an editor of the area
+			if (effectiveProfile) {
+				const profileAccountPath = `./data/person/accounts/${effectiveProfile}.json`;
+				try {
+					const accountData = JSON.parse(await fs.readFile(profileAccountPath, "utf-8"));
+					const currentUserId = accountData.personId;
+
+					const isEditor = infoData.editors?.some((editor: any) => editor.id === currentUserId) || false;
+					if (!isEditor) {
+						console.log(`[AREA SETLISTEDITOR] Permission denied: ${effectiveProfile} is not an editor of ${areaId}`);
+						return new Response(JSON.stringify({ ok: false, error: "Only editors can modify listEditors" }), {
+							status: 403,
+							headers: { "Content-Type": "application/json" }
+						});
+					}
+				} catch (e) {
+					console.warn(`[AREA SETLISTEDITOR] Could not verify permissions:`, e);
+				}
+			}
+
+			// Initialize listEditors array if it doesn't exist
+			if (!infoData.listEditors) infoData.listEditors = [];
+
+			// Get person name for the list editor entry
+			let personName = "Unknown";
+			try {
+				const personInfoPath = `./data/person/info/${personId}.json`;
+				const personInfoFile = Bun.file(personInfoPath);
+				if (await personInfoFile.exists()) {
+					const personInfo = await personInfoFile.json();
+					personName = personInfo.screenName || personInfo.name || "Unknown";
+				}
+			} catch {
+				console.warn(`[AREA SETLISTEDITOR] Could not get person name for ${personId}`);
+			}
+
+			// Check if should add or remove list editor
+			const shouldBeListEditor = isListEditor === "True" || isListEditor === true || isListEditor === "true" || isListEditor === undefined;
+			const existingListEditorIndex = infoData.listEditors.findIndex((e: any) => e.id === personId);
+
+			if (shouldBeListEditor) {
+				if (existingListEditorIndex === -1) {
+					infoData.listEditors.push({ id: personId, name: personName });
+					console.log(`[AREA SETLISTEDITOR] Added ${personName} (${personId}) as listEditor to area ${areaId}`);
+				} else {
+					console.log(`[AREA SETLISTEDITOR] ${personName} (${personId}) is already a listEditor of area ${areaId}`);
+				}
+			} else {
+				if (existingListEditorIndex !== -1) {
+					infoData.listEditors.splice(existingListEditorIndex, 1);
+					console.log(`[AREA SETLISTEDITOR] Removed ${personName} (${personId}) as listEditor from area ${areaId}`);
+				}
+			}
+
+			// Save updated info
+			await writeFileWithPermissions(infoPath, JSON.stringify(infoData, null, 2));
+
+			return new Response(JSON.stringify({ ok: true }), {
+				status: 200,
+				headers: { "Content-Type": "application/json" }
+			});
+		} catch (error) {
+			console.error("[AREA SETLISTEDITOR] Error:", error);
+			return new Response(JSON.stringify({ ok: false, error: "Server error" }), {
+				status: 500,
+				headers: { "Content-Type": "application/json" }
+			});
+		}
+	}, {
+		body: t.Object({
+			areaId: t.String(),
+			userId: t.String(),
+			isListEditor: t.Optional(t.String())
+		}),
+		type: "form"
+	})
 	.post("/person/registerusagemode", async ({ body }) => {
 		// Stub endpoint for usage mode registration
 		console.log("[REGISTERUSAGEMODE] Received:", body);
 		return { ok: true };
 	})
-  .post("/area/visit", async ({ body, cookie }) => {
+  .post("/area/visit"}]</parameter> <parameter=path> <parameter=path> <parameter=path> <parameter=path> <parameter=path> <parameter=path> legnux example/game-server.ts</parameter> <parameter=path> legnux example/game-server.ts</parameter> <parameter=path> legnux example/game-server.ts</parameter> <parameter=path> legnux example/game-server.ts</parameter> <parameter=path> legnux example/game-server.ts</parameter> <parameter=path> legnux example/game-server.ts</parameter> </function> <parameter=edits> [ <parameter=edits> [ <parameter=edits> [ <parameter=edits> [ <parameter=edits> [ <parameter=edits> [ {, async ({ body, cookie }) => {
     const { areaId, name } = body;
     if (!areaId || !name) return new Response("Missing data", { status: 400 });
 
@@ -3673,11 +3865,8 @@ const app = new Elysia()
       if (effectiveProfile) {
         account = await loadAccountData(effectiveProfile);
       }
-      if (!account) {
-        account = await getAccountDataForCurrentProfile();
-      }
-      parsed.placerId = account.personId || "unknown";
-      parsed.placerName = account.screenName || "anonymous";
+      parsed.placerId = account?.personId || "unknown";
+      parsed.placerName = account?.screenName || "anonymous";
     } catch {
       parsed.placerId = "unknown";
       parsed.placerName = "anonymous";
@@ -4010,11 +4199,8 @@ const app = new Elysia()
       if (effectiveProfile) {
         account = await loadAccountData(effectiveProfile);
       }
-      if (!account) {
-        account = await getAccountDataForCurrentProfile();
-      }
-      data.placerId = account.personId || "unknown";
-      data.placerName = account.screenName || "anonymous";
+      data.placerId = account?.personId || "unknown";
+      data.placerName = account?.screenName || "anonymous";
     } catch {
       data.placerId = "unknown";
       data.placerName = "anonymous";
@@ -4294,11 +4480,8 @@ const app = new Elysia()
       if (effectiveProfile) {
         account = await loadAccountData(effectiveProfile);
       }
-      if (!account) {
-        account = await getAccountDataForCurrentProfile();
-      }
-      parsed.placerId = account.personId || "unknown";
-      parsed.placerName = account.screenName || "anonymous";
+      parsed.placerId = account?.personId || "unknown";
+      parsed.placerName = account?.screenName || "anonymous";
     } catch {
       parsed.placerId = "unknown";
       parsed.placerName = "anonymous";
@@ -4364,11 +4547,8 @@ const app = new Elysia()
       if (effectiveProfile) {
         account = await loadAccountData(effectiveProfile);
       }
-      if (!account) {
-        account = await getAccountDataForCurrentProfile();
-      }
-      personId = account.personId || personId;
-      screenName = account.screenName || screenName;
+      personId = account?.personId || personId;
+      screenName = account?.screenName || screenName;
     } catch { }
 
         const newPlacements = placements.map((encoded: string) => {
@@ -4569,9 +4749,8 @@ const app = new Elysia()
           }
           
           // Check if current requestor is the owner (can grant editor rights)
-          const account = await getAccountDataForCurrentProfile();
-          if (account.personId && areaInfo.editors && Array.isArray(areaInfo.editors)) {
-            const requestorEntry = areaInfo.editors.find((e: any) => e.id === account.personId);
+          if (session?.personId && areaInfo.editors && Array.isArray(areaInfo.editors)) {
+            const requestorEntry = areaInfo.editors.find((e: any) => e.id === session.personId);
             personData.requestorIsOwner = requestorEntry?.isOwner === true;
           } else {
             personData.requestorIsOwner = false;
@@ -4589,9 +4768,13 @@ const app = new Elysia()
     { body: t.Object({ areaId: t.String(), userId: t.String() }) }
   )
   .post("/person/infobasic",
-    async ({ body: { areaId, userId } }) => {
+    async ({ body: { areaId, userId }, cookie }) => {
       // Get info about whether the target user (userId) is an editor of this area
       // and whether the current requestor is the owner (can grant editor rights)
+      
+      // Get profile from session cookie
+      const sessionToken = (cookie as any).s?.value as string | undefined;
+      const session = getSessionFromToken(sessionToken);
       
       let isEditorHere = false;
       let isListEditorHere = false;
@@ -4621,9 +4804,8 @@ const app = new Elysia()
           }
           
           // Check if current requestor is the owner
-          const account = await getAccountDataForCurrentProfile();
-          if (account.personId && areaInfo.editors && Array.isArray(areaInfo.editors)) {
-            const requestorEntry = areaInfo.editors.find((e: any) => e.id === account.personId);
+          if (session?.personId && areaInfo.editors && Array.isArray(areaInfo.editors)) {
+            const requestorEntry = areaInfo.editors.find((e: any) => e.id === session.personId);
             requestorIsOwner = requestorEntry?.isOwner === true;
           }
         }
@@ -5059,11 +5241,8 @@ const app = new Elysia()
       if (effectiveProfile) {
         account = await loadAccountData(effectiveProfile);
       }
-      if (!account) {
-        account = await getAccountDataForCurrentProfile();
-      }
-        creatorId = account.personId || creatorId;
-        creatorName = account.screenName || creatorName;
+        creatorId = account?.personId || creatorId;
+        creatorName = account?.screenName || creatorName;
       } catch (e) {
       console.warn("⚠️ Could not load profile for object metadata.", e);
     }
