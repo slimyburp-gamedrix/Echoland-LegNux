@@ -85,7 +85,21 @@ class AsyncMutex {
 }
 
 const accountMutex = new AsyncMutex();
+const areaFileMutex = new AsyncMutex();  // Prevents concurrent area load file corruption
 const textEncoder = new TextEncoder();
+
+// Atomic write: write to a temp file first, then rename to avoid partial writes corrupting the target
+async function atomicWriteFile(filePath: string, data: string): Promise<void> {
+  const tmpPath = filePath + ".tmp";
+  await fs.writeFile(tmpPath, data);
+  await fs.rename(tmpPath, filePath);
+  // Set full permissions so the file is always readable/writable on Linux
+  try {
+    await fs.chmod(filePath, 0o666);
+  } catch (error) {
+    console.warn(`Could not set permissions on ${filePath}:`, error.message);
+  }
+}
 
 function daysOld(ts: number) {
   const now = Date.now();
@@ -2278,6 +2292,10 @@ const app = new Elysia()
             };
           } catch (err) {
             console.error(`[AREA LOAD] ❌ Error parsing area ${areaId}:`, err);
+            // Distinguish between corrupted data and other errors
+            if (err instanceof SyntaxError) {
+              return Response.json({ "ok": false, "error": "Area data corrupted", "_reasonDenied": "Corrupted", "serveTime": 13 }, { status: 500 });
+            }
             return Response.json({ "ok": false, "_reasonDenied": "Private", "serveTime": 13 }, { status: 200 });
           }
         } else {
@@ -3020,7 +3038,9 @@ const app = new Elysia()
         }, null, 2));
 
         loadData.areaKey = newKey;
-        await writeFileWithPermissions(loadPath, JSON.stringify(loadData, null, 2));
+        await areaFileMutex.runExclusive(async () => {
+          await atomicWriteFile(loadPath, JSON.stringify(loadData, null, 2));
+        });
 
         return new Response(`✅ Repaired home area with new key: ${newKey}`, { status: 200 });
       }
@@ -3377,9 +3397,11 @@ const app = new Elysia()
 				console.log(`[AREA SETTINGS] Updated description for ${areaId}`);
 			}
 			
-			// Write updated data back to load file
+			// Write updated data back to load file (with mutex to prevent corruption)
 			if (updated) {
-				await writeFileWithPermissions(loadPath, JSON.stringify(areaData, null, 2));
+				await areaFileMutex.runExclusive(async () => {
+					await atomicWriteFile(loadPath, JSON.stringify(areaData, null, 2));
+				});
 				
 				// Also update info file if it exists
 				try {
@@ -3478,11 +3500,13 @@ const app = new Elysia()
         });
       }
 			
-			// Update load file
+			// Update load file (with mutex to prevent corruption)
 			const areaData = await loadFile.json();
 			const oldName = areaData.areaName;
 			areaData.areaName = trimmedName;
-			await writeFileWithPermissions(loadPath, JSON.stringify(areaData, null, 2));
+			await areaFileMutex.runExclusive(async () => {
+				await atomicWriteFile(loadPath, JSON.stringify(areaData, null, 2));
+			});
 			
 			// Update info file
 			try {
@@ -3929,23 +3953,33 @@ const app = new Elysia()
     await writeFileWithPermissions(placementPath, JSON.stringify(parsed, null, 2));
 
     const areaFilePath = `./data/area/load/${areaId}.json`;
-    let areaData: Record<string, any> = {};
-    try {
-      areaData = JSON.parse(await fs.readFile(areaFilePath, "utf-8"));
-    } catch (error) {
-      console.error(`[PLACEMENT NEW] Failed to read area load file for ${areaId}:`, error);
-      return new Response(JSON.stringify({ ok: false, error: "Failed to read area data" }), {
+
+    // Use mutex to prevent concurrent read-modify-write corruption
+    let result: any;
+    await areaFileMutex.runExclusive(async () => {
+      let areaData: Record<string, any> = {};
+      try {
+        areaData = JSON.parse(await fs.readFile(areaFilePath, "utf-8"));
+      } catch (error) {
+        console.error(`[PLACEMENT NEW] Failed to read area load file for ${areaId}:`, error);
+        result = { error: true, errorMsg: "Failed to read area data" };
+        return;
+      }
+
+      if (!Array.isArray(areaData.placements)) areaData.placements = [];
+      areaData.placements = areaData.placements.filter((p: any) => p.Id !== placementId);
+      areaData.placements.push(parsed);
+
+      await atomicWriteFile(areaFilePath, JSON.stringify(areaData, null, 2));
+      result = { ok: true };
+    });
+
+    if (result && result.error) {
+      return new Response(JSON.stringify({ ok: false, error: result.errorMsg }), {
         status: 500,
         headers: { "Content-Type": "application/json" }
       });
     }
-
-    if (!Array.isArray(areaData.placements)) areaData.placements = [];
-
-    areaData.placements = areaData.placements.filter(p => p.Id !== placementId);
-    areaData.placements.push(parsed);
-
-    await writeFileWithPermissions(areaFilePath, JSON.stringify(areaData, null, 2));
 
     return new Response(JSON.stringify({ ok: true }), {
       status: 200,
@@ -4367,7 +4401,10 @@ const app = new Elysia()
     }
 
     targetAreaData.placements = targetPlacements;
-    await writeFileWithPermissions(targetPath, JSON.stringify(targetAreaData, null, 2));
+    // Use mutex for target area file write to prevent corruption
+    await areaFileMutex.runExclusive(async () => {
+      await atomicWriteFile(targetPath, JSON.stringify(targetAreaData, null, 2));
+    });
 
     return new Response(JSON.stringify({ ok: true, copied: count }), {
       status: 200,
@@ -4389,27 +4426,34 @@ const app = new Elysia()
       await fs.rm(placementPath);
     } catch { }
 
-    // Remove from area file's placements array
+    // Remove from area file's placements array (with mutex to prevent corruption)
     const areaFilePath = `./data/area/load/${areaId}.json`;
-    let areaData: Record<string, any> = {};
-    try {
-      areaData = JSON.parse(await fs.readFile(areaFilePath, "utf-8"));
-    } catch (error) {
-      console.error(`[PLACEMENT DELETE] Failed to read area load file for ${areaId}:`, error);
-      return new Response(JSON.stringify({ ok: false, error: "Failed to read area data" }), {
+    let result: any;
+    await areaFileMutex.runExclusive(async () => {
+      let areaData: Record<string, any> = {};
+      try {
+        areaData = JSON.parse(await fs.readFile(areaFilePath, "utf-8"));
+      } catch (error) {
+        console.error(`[PLACEMENT DELETE] Failed to read area load file for ${areaId}:`, error);
+        result = { error: true, errorMsg: "Failed to read area data" };
+        return;
+      }
+
+      if (!Array.isArray(areaData.placements)) areaData.placements = [];
+      areaData.placements = areaData.placements.filter(
+        (p: any) => p.Id !== placementId
+      );
+
+      await atomicWriteFile(areaFilePath, JSON.stringify(areaData, null, 2));
+      result = { ok: true };
+    });
+
+    if (result && result.error) {
+      return new Response(JSON.stringify({ ok: false, error: result.errorMsg }), {
         status: 500,
         headers: { "Content-Type": "application/json" }
       });
     }
-
-    if (!Array.isArray(areaData.placements)) areaData.placements = [];
-
-    // Remove the placement with this Id
-    areaData.placements = areaData.placements.filter(
-      (p: any) => p.Id !== placementId
-    );
-
-    await writeFileWithPermissions(areaFilePath, JSON.stringify(areaData, null, 2));
 
     return new Response(JSON.stringify({ ok: true }), {
       status: 200,
@@ -4434,22 +4478,30 @@ const app = new Elysia()
       }
     } catch { }
 
-    // Update area load file with ground placement
+    // Update area load file with ground placement (with mutex to prevent corruption)
     const areaFilePath = `./data/area/load/${areaId}.json`;
-    try {
-      const areaData = JSON.parse(await fs.readFile(areaFilePath, "utf-8"));
-      const groundPlacement = {
-        Id: crypto.randomUUID().replace(/-/g, "").slice(0, 24),
-        Tid: "000000000000000000000001",
-        P: { x: 0, y: -0.3, z: 0 },
-        R: { x: 0, y: 0, z: 0 }
-      };
-      areaData.placements = [groundPlacement];
-      await writeFileWithPermissions(areaFilePath, JSON.stringify(areaData, null, 2));
-      await writeFileWithPermissions(path.join(placementDir, `${groundPlacement.Id}.json`), JSON.stringify(groundPlacement, null, 2));
-    } catch (error) {
-      console.error(`[PLACEMENT DELETEALL] Failed to update area load file for ${areaId}:`, error);
-      return new Response(JSON.stringify({ ok: false, error: "Failed to update area data" }), {
+    let deleteallResult: any;
+    await areaFileMutex.runExclusive(async () => {
+      try {
+        const areaData = JSON.parse(await fs.readFile(areaFilePath, "utf-8"));
+        const groundPlacement = {
+          Id: randomUUID().replace(/-/g, "").slice(0, 24),
+          Tid: "000000000000000000000001",
+          P: { x: 0, y: -0.3, z: 0 },
+          R: { x: 0, y: 0, z: 0 }
+        };
+        areaData.placements = [groundPlacement];
+        await atomicWriteFile(areaFilePath, JSON.stringify(areaData, null, 2));
+        await writeFileWithPermissions(path.join(placementDir, `${groundPlacement.Id}.json`), JSON.stringify(groundPlacement, null, 2));
+        deleteallResult = { ok: true };
+      } catch (error) {
+        console.error(`[PLACEMENT DELETEALL] Failed to update area load file for ${areaId}:`, error);
+        deleteallResult = { error: true, errorMsg: "Failed to update area data" };
+      }
+    });
+
+    if (deleteallResult && deleteallResult.error) {
+      return new Response(JSON.stringify({ ok: false, error: deleteallResult.errorMsg }), {
         status: 500,
         headers: { "Content-Type": "application/json" }
       });
@@ -4484,20 +4536,28 @@ const app = new Elysia()
       }
     } catch { }
 
-    // Update area load file placements
-    try {
-      const areaData = JSON.parse(await fs.readFile(areaFilePath, "utf-8"));
-      if (Array.isArray(areaData.placements)) {
-        for (const p of areaData.placements) {
-          if (p.Tid === originalThingId) {
-            p.Tid = newThingId;
+    // Update area load file placements (with mutex to prevent corruption)
+    let replaceResult: any;
+    await areaFileMutex.runExclusive(async () => {
+      try {
+        const areaData = JSON.parse(await fs.readFile(areaFilePath, "utf-8"));
+        if (Array.isArray(areaData.placements)) {
+          for (const p of areaData.placements) {
+            if (p.Tid === originalThingId) {
+              p.Tid = newThingId;
+            }
           }
         }
+        await atomicWriteFile(areaFilePath, JSON.stringify(areaData, null, 2));
+        replaceResult = { ok: true };
+      } catch (error) {
+        console.error(`[PLACEMENT REPLACETHING] Failed to update area load file for ${areaId}:`, error);
+        replaceResult = { error: true, errorMsg: "Failed to update area data" };
       }
-      await writeFileWithPermissions(areaFilePath, JSON.stringify(areaData, null, 2));
-    } catch (error) {
-      console.error(`[PLACEMENT REPLACETHING] Failed to update area load file for ${areaId}:`, error);
-      return new Response(JSON.stringify({ ok: false, error: "Failed to update area data" }), {
+    });
+
+    if (replaceResult && replaceResult.error) {
+      return new Response(JSON.stringify({ ok: false, error: replaceResult.errorMsg }), {
         status: 500,
         headers: { "Content-Type": "application/json" }
       });
@@ -4541,22 +4601,31 @@ const app = new Elysia()
     await writeFileWithPermissions(placementPath, JSON.stringify(parsed, null, 2));
 
     const areaFilePath = `./data/area/load/${areaId}.json`;
-    let areaData: Record<string, any> = {};
-    try {
-      areaData = JSON.parse(await fs.readFile(areaFilePath, "utf-8"));
-    } catch (error) {
-      console.error(`[PLACEMENT UPDATE] Failed to read area load file for ${areaId}:`, error);
-      return new Response(JSON.stringify({ ok: false, error: "Failed to read area data" }), {
+    let updateResult: any;
+    await areaFileMutex.runExclusive(async () => {
+      let areaData: Record<string, any> = {};
+      try {
+        areaData = JSON.parse(await fs.readFile(areaFilePath, "utf-8"));
+      } catch (error) {
+        console.error(`[PLACEMENT UPDATE] Failed to read area load file for ${areaId}:`, error);
+        updateResult = { error: true, errorMsg: "Failed to read area data" };
+        return;
+      }
+
+      if (!Array.isArray(areaData.placements)) areaData.placements = [];
+      areaData.placements = areaData.placements.filter((p: any) => p.Id !== placementId);
+      areaData.placements.push(parsed);
+
+      await atomicWriteFile(areaFilePath, JSON.stringify(areaData, null, 2));
+      updateResult = { ok: true };
+    });
+
+    if (updateResult && updateResult.error) {
+      return new Response(JSON.stringify({ ok: false, error: updateResult.errorMsg }), {
         status: 500,
         headers: { "Content-Type": "application/json" }
       });
     }
-
-    if (!Array.isArray(areaData.placements)) areaData.placements = [];
-    areaData.placements = areaData.placements.filter(p => p.Id !== placementId);
-    areaData.placements.push(parsed);
-
-    await writeFileWithPermissions(areaFilePath, JSON.stringify(areaData, null, 2));
 
     return new Response(JSON.stringify({ ok: true }), {
       status: 200,
@@ -4572,18 +4641,6 @@ const app = new Elysia()
     const { areaId, placements } = body;
 
     const areaFilePath = `./data/area/load/${areaId}.json`;
-    let areaData: Record<string, any> = {};
-    try {
-      areaData = JSON.parse(await fs.readFile(areaFilePath, "utf-8"));
-    } catch (error) {
-      console.error(`[PLACEMENT DUPLICATE] Failed to read area load file for ${areaId}:`, error);
-      return new Response(JSON.stringify({ ok: false, error: "Failed to read area data" }), {
-        status: 500,
-        headers: { "Content-Type": "application/json" }
-      });
-    }
-
-    if (!Array.isArray(areaData.placements)) areaData.placements = [];
 
     // Get profile from session cookie
     const sessionToken = (cookie as any).s?.value as string | undefined;
@@ -4601,7 +4658,7 @@ const app = new Elysia()
       screenName = account?.screenName || screenName;
     } catch { }
 
-        const newPlacements = placements.map((encoded: string) => {
+    const newPlacements = placements.map((encoded: string) => {
       const parsed = JSON.parse(decodeURIComponent(encoded));
       return {
         Id: parsed.Id,
@@ -4617,22 +4674,45 @@ const app = new Elysia()
       };
     });
 
-    for (const placement of newPlacements) {
-      const placementPath = `./data/placement/info/${areaId}/${placement.Id}.json`;
-      await mkdirWithPermissions(`./data/placement/info/${areaId}`);
-      await writeFileWithPermissions(placementPath, JSON.stringify(placement, null, 2));
-    }
-
-    const existingIds = new Set(areaData.placements.map((p: any) => p.Id));
-    for (const placement of newPlacements) {
-      if (!existingIds.has(placement.Id)) {
-        areaData.placements.push(placement);
+    // Use mutex to prevent concurrent read-modify-write corruption
+    let dupResult: any;
+    await areaFileMutex.runExclusive(async () => {
+      let areaData: Record<string, any> = {};
+      try {
+        areaData = JSON.parse(await fs.readFile(areaFilePath, "utf-8"));
+      } catch (error) {
+        console.error(`[PLACEMENT DUPLICATE] Failed to read area load file for ${areaId}:`, error);
+        dupResult = { error: true, errorMsg: "Failed to read area data" };
+        return;
       }
+
+      if (!Array.isArray(areaData.placements)) areaData.placements = [];
+
+      for (const placement of newPlacements) {
+        const placementPath = `./data/placement/info/${areaId}/${placement.Id}.json`;
+        await mkdirWithPermissions(`./data/placement/info/${areaId}`);
+        await writeFileWithPermissions(placementPath, JSON.stringify(placement, null, 2));
+      }
+
+      const existingIds = new Set(areaData.placements.map((p: any) => p.Id));
+      for (const placement of newPlacements) {
+        if (!existingIds.has(placement.Id)) {
+          areaData.placements.push(placement);
+        }
+      }
+
+      await atomicWriteFile(areaFilePath, JSON.stringify(areaData, null, 2));
+      dupResult = { ok: true, count: newPlacements.length };
+    });
+
+    if (dupResult && dupResult.error) {
+      return new Response(JSON.stringify({ ok: false, error: dupResult.errorMsg }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" }
+      });
     }
 
-    await writeFileWithPermissions(areaFilePath, JSON.stringify(areaData, null, 2));
-
-    return new Response(JSON.stringify({ ok: true, count: newPlacements.length }), {
+    return new Response(JSON.stringify({ ok: true, count: dupResult?.count || newPlacements.length }), {
       status: 200,
       headers: { "Content-Type": "application/json" }
     });
@@ -4712,21 +4792,29 @@ const app = new Elysia()
         console.log("[SETATTR] Could not write placement file (may be read-only):", e);
       }
       
-      // Always update the area load file
-      try {
-        const areaData = JSON.parse(await fs.readFile(areaFilePath, "utf-8"));
-        
-        if (Array.isArray(areaData.placements)) {
-          const placementIndex = areaData.placements.findIndex((p: any) => p.Id === placementId);
-          if (placementIndex !== -1) {
-            areaData.placements[placementIndex].A = placementData.A;
-            await writeFileWithPermissions(areaFilePath, JSON.stringify(areaData, null, 2));
-            console.log("[SETATTR] Updated area load file");
+      // Always update the area load file (with mutex to prevent corruption)
+      let setattrResult: any;
+      await areaFileMutex.runExclusive(async () => {
+        try {
+          const areaData = JSON.parse(await fs.readFile(areaFilePath, "utf-8"));
+
+          if (Array.isArray(areaData.placements)) {
+            const placementIndex = areaData.placements.findIndex((p: any) => p.Id === placementId);
+            if (placementIndex !== -1) {
+              areaData.placements[placementIndex].A = placementData.A;
+              await atomicWriteFile(areaFilePath, JSON.stringify(areaData, null, 2));
+              console.log("[SETATTR] Updated area load file");
+            }
           }
+          setattrResult = { ok: true };
+        } catch (e) {
+          console.error("[SETATTR] Failed to update area file:", e);
+          setattrResult = { error: true, errorMsg: "Failed to update area file" };
         }
-      } catch (e) {
-        console.error("[SETATTR] Failed to update area file:", e);
-        throw e;
+      });
+
+      if (setattrResult && setattrResult.error) {
+        throw new Error(setattrResult.errorMsg);
       }
       
       return new Response(JSON.stringify({ ok: true }), {
