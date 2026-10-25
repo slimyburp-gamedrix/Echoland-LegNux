@@ -2135,6 +2135,8 @@ const app = new Elysia()
         console.log(
           `[PING DELIVER] ${session.profileName} (${session.personId}) <- ${latest.fromScreenName} invites to "${latest.areaName}" (${latest.areaId})`
         );
+        // Clear delivered pings so they don't repeat on next poll
+        pendingPingsByPersonId.set(session.personId, []);
       }
     }
     
